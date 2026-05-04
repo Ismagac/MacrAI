@@ -1,0 +1,182 @@
+'use client'
+
+import { useEffect } from 'react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+import { useTranslations, useLocale } from 'next-intl'
+import { useRouter } from 'next/navigation'
+import { AppLayout } from '@/components/layout/AppLayout'
+import { useProfile } from '@/hooks/useProfile'
+import { calcTDEE } from '@/lib/utils/macros'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useToast } from '@/components/ui/use-toast'
+import type { ActivityLevel, Sexo } from '@/types'
+import { Zap } from 'lucide-react'
+
+const schema = z.object({
+  username: z.string().optional(),
+  peso_kg: z.coerce.number().positive().max(400).optional(),
+  altura_cm: z.coerce.number().positive().max(300).optional(),
+  edad: z.coerce.number().int().positive().max(120).optional(),
+  sexo: z.enum(['hombre', 'mujer', 'otro']).optional(),
+  nivel_actividad: z
+    .enum(['sedentario', 'ligero', 'moderado', 'activo', 'muy_activo'])
+    .optional(),
+})
+type FormValues = z.infer<typeof schema>
+
+export default function PerfilPage() {
+  const t = useTranslations('perfil')
+  const locale = useLocale()
+  const router = useRouter()
+  const { profile, loading, updateProfile } = useProfile()
+  const { toast } = useToast()
+
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    watch,
+    reset,
+    formState: { isSubmitting },
+  } = useForm<FormValues>({ resolver: zodResolver(schema) })
+
+  useEffect(() => {
+    if (profile) {
+      reset({
+        username: profile.username ?? '',
+        peso_kg: profile.peso_kg,
+        altura_cm: profile.altura_cm,
+        edad: profile.edad,
+        sexo: profile.sexo,
+        nivel_actividad: profile.nivel_actividad,
+      })
+    }
+  }, [profile, reset])
+
+  const values = watch()
+  const tdee = profile?.id
+    ? calcTDEE({
+        ...profile,
+        peso_kg: values.peso_kg ?? profile.peso_kg,
+        altura_cm: values.altura_cm ?? profile.altura_cm,
+        edad: values.edad ?? profile.edad,
+        sexo: (values.sexo ?? profile.sexo) as Sexo,
+        nivel_actividad: (values.nivel_actividad ?? profile.nivel_actividad) as ActivityLevel,
+      })
+    : null
+
+  async function onSubmit(data: FormValues) {
+    const err = await updateProfile(data)
+    if (!err) toast({ title: t('saved') })
+  }
+
+  function useTDEEAsGoal() {
+    if (tdee) router.push(`/${locale}/objetivos?kcal=${tdee.tdee}`)
+  }
+
+  if (loading) return <AppLayout><p className="text-muted-foreground">Cargando...</p></AppLayout>
+
+  return (
+    <AppLayout>
+      <div className="max-w-2xl space-y-6">
+        <h1 className="text-2xl font-bold">{t('title')}</h1>
+
+        <Card>
+          <CardContent className="pt-6">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              <div>
+                <Label>{t('username')}</Label>
+                <Input {...register('username')} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>{t('weight')}</Label>
+                  <Input type="number" step="0.1" {...register('peso_kg')} />
+                </div>
+                <div>
+                  <Label>{t('height')}</Label>
+                  <Input type="number" step="0.5" {...register('altura_cm')} />
+                </div>
+                <div>
+                  <Label>{t('age')}</Label>
+                  <Input type="number" {...register('edad')} />
+                </div>
+                <div>
+                  <Label>{t('sex')}</Label>
+                  <Select
+                    value={values.sexo ?? ''}
+                    onValueChange={(v) => setValue('sexo', v as Sexo)}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="hombre">{t('hombre')}</SelectItem>
+                      <SelectItem value="mujer">{t('mujer')}</SelectItem>
+                      <SelectItem value="otro">{t('otro')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div>
+                <Label>{t('activityLevel')}</Label>
+                <Select
+                  value={values.nivel_actividad ?? ''}
+                  onValueChange={(v) => setValue('nivel_actividad', v as ActivityLevel)}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(['sedentario', 'ligero', 'moderado', 'activo', 'muy_activo'] as ActivityLevel[]).map((l) => (
+                      <SelectItem key={l} value={l}>{t(l)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <Button type="submit" disabled={isSubmitting}>{t('save')}</Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* TDEE card */}
+        {tdee && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Zap className="h-4 w-4 text-yellow-500" />
+                {t('tdee')}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg bg-muted/50 p-3 text-center">
+                  <p className="text-2xl font-bold">{tdee.bmr}</p>
+                  <p className="text-xs text-muted-foreground">{t('bmr')} (kcal)</p>
+                </div>
+                <div className="rounded-lg bg-primary/10 p-3 text-center">
+                  <p className="text-2xl font-bold text-primary">{tdee.tdee}</p>
+                  <p className="text-xs text-muted-foreground">{t('tdee')} (kcal)</p>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={useTDEEAsGoal}>
+                {t('useTdee')}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </AppLayout>
+  )
+}
