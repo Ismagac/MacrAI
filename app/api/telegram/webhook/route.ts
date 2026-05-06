@@ -3,8 +3,8 @@ import { handleUpdate } from '@/lib/bot/telegram'
 import type TelegramBot from 'node-telegram-bot-api'
 
 // This endpoint receives incoming updates from Telegram via webhook.
-// Telegram requires a 200 OK response within 5 seconds.
-// Long-running work is done async so we can respond immediately.
+// In serverless environments, we must await processing so callback queries
+// are actually handled before the function exits.
 
 export async function POST(request: NextRequest) {
   // Optional: verify the webhook secret to prevent unauthorized calls
@@ -21,11 +21,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // Process update async — Telegram only needs a 200 back quickly
-  // We don't await so we can respond immediately and avoid timeouts
-  handleUpdate(update).catch((err) => {
+  try {
+    await handleUpdate(update)
+  } catch (err) {
     console.error('[TelegramWebhook] Error handling update:', err)
-  })
+  }
 
   return NextResponse.json({ ok: true })
 }
