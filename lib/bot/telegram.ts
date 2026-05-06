@@ -11,6 +11,7 @@
 import TelegramBot from 'node-telegram-bot-api'
 import { createClient } from '@supabase/supabase-js'
 import { searchOpenFoodFacts } from '@/lib/api/openfoodfacts'
+import { detectFoodFromImageUrl, type DetectedFoodMacros } from '@/lib/api/ocr'
 import type { FoodItem } from '@/types'
 
 // ─── Singleton bot instance (no polling) ─────────────────────────────────────
@@ -37,12 +38,25 @@ function getDb() {
 
 type MealType = 'desayuno' | 'almuerzo' | 'comida' | 'merienda' | 'cena' | 'snack' | 'otro'
 
+type CatalogDraft = {
+  nombre: string
+  kcal_100g: number
+  proteinas_100g: number
+  carbohidratos_100g: number
+  grasas_100g: number
+  fibra_100g: number
+}
+
 type BotSession =
   | { step: 'idle' }
   | { step: 'selecting_meal_type' }
   | { step: 'awaiting_food_query'; mealType: MealType; mealNumber: number }
   | { step: 'selecting_food'; mealType: MealType; mealNumber: number; foods: FoodItem[] }
   | { step: 'awaiting_food_qty'; mealType: MealType; mealNumber: number; food: FoodItem }
+  | { step: 'awaiting_catalog_photo' }
+  | { step: 'awaiting_catalog_name'; draft: CatalogDraft }
+  | { step: 'awaiting_catalog_macro_edit'; draft: CatalogDraft }
+  | { step: 'awaiting_catalog_confirm'; draft: CatalogDraft }
 
 // ─── Session helpers ──────────────────────────────────────────────────────────
 
@@ -70,6 +84,7 @@ const MAIN_MENU_KEYBOARD: TelegramBot.InlineKeyboardMarkup = {
       { text: '📅 Historial semanal', callback_data: 'hs' },
       { text: '🍎 Mi catálogo', callback_data: 'ct' },
     ],
+    [{ text: '📸 Añadir alimento por foto', callback_data: 'ca' }],
     [{ text: 'ℹ️ Ayuda', callback_data: 'help' }],
   ],
 }
@@ -105,6 +120,118 @@ async function sendMealTypeMenu(chatId: number) {
   await getBot().sendMessage(chatId, '¿En qué comida lo quieres registrar?', {
     reply_markup: MEAL_TYPE_KEYBOARD,
   })
+}
+
+function buildCatalogDraftFromDetected(name: string, macros: DetectedFoodMacros): CatalogDraft {
+  return {
+    nombre: name,
+    kcal_100g: macros.kcal_100g,
+    proteinas_100g: macros.proteinas_100g,
+    carbohidratos_100g: macros.carbohidratos_100g,
+    grasas_100g: macros.grasas_100g,
+    fibra_100g: macros.fibra_100g,
+  }
+}
+
+function formatDraft(draft: CatalogDraft): string {
+  return (
+    `*${draft.nombre}*\n` +
+    `🔥 ${draft.kcal_100g} kcal/100g\n` +
+    `🥩 P: ${draft.proteinas_100g}g · 🍞 C: ${draft.carbohidratos_100g}g · 🧈 G: ${draft.grasas_100g}g\n` +
+    `🌿 Fibra: ${draft.fibra_100g}g`
+  )
+}
+
+function parseMacroEditInput(text: string): Omit<CatalogDraft, 'nombre'> | null {
+  const parts = text
+    .split(/[;,|]/)
+    .map((p) => p.trim().replace(',', '.'))
+    .filter(Boolean)
+
+  if (parts.length < 4 || parts.length > 5) return null
+
+  const nums = parts.map((p) => Number(p))
+  if (nums.some((n) => !Number.isFinite(n) || n < 0)) return null
+
+  return {
+    kcal_100g: Math.round(nums[0] * 10) / 10,
+    proteinas_100g: Math.round(nums[1] * 10) / 10,
+    carbohidratos_100g: Math.round(nums[2] * 10) / 10,
+    grasas_100g: Math.round(nums[3] * 10) / 10,
+    fibra_100g: Math.round((nums[4] ?? 0) * 10) / 10,
+  }
+}
+
+async function promptCatalogConfirm(chatId: number, draft: CatalogDraft) {
+  await getBot().sendMessage(
+    chatId,
+    `Revisa el alimento antes de guardarlo en tu catálogo:\n\n${formatDraft(draft)}`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '✅ Guardar en catálogo', callback_data: 'ca_save' }],
+          [{ text: '✏️ Corregir macros', callback_data: 'ca_edit_macros' }],
+          [{ text: '✍️ Cambiar nombre', callback_data: 'ca_edit_name' }],
+          [{ text: '❌ Cancelar', callback_data: 'menu' }],
+        ],
+      },
+    }
+  )
+}
+
+async function handleCatalogPhoto(chatId: number, fileId: string) {
+  const bot = getBot()
+  const file = await bot.getFile(fileId)
+
+  if (!file.file_path) {
+    await bot.sendMessage(chatId, 'No pude leer la imagen. Inténtalo de nuevo con otra foto.')
+    return
+  }
+
+  const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`
+
+  await bot.sendMessage(chatId, '🔍 Analizando etiqueta nutricional...')
+  const detected = await detectFoodFromImageUrl(fileUrl)
+
+  if (!detected) {
+    const draft: CatalogDraft = {
+      nombre: 'Nuevo alimento',
+      kcal_100g: 0,
+      proteinas_100g: 0,
+      carbohidratos_100g: 0,
+      grasas_100g: 0,
+      fibra_100g: 0,
+    }
+
+    await setSession(chatId, { step: 'awaiting_catalog_name', draft })
+    await bot.sendMessage(
+      chatId,
+      'No he podido detectar macros de forma fiable.\n\nEscribe el *nombre* que quieres para el alimento y luego te pediré los macros manualmente.',
+      {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '❌ Cancelar', callback_data: 'menu' }]] },
+      }
+    )
+    return
+  }
+
+  const draft = buildCatalogDraftFromDetected(detected.suggestedName, detected.macros)
+  await setSession(chatId, { step: 'awaiting_catalog_name', draft })
+
+  await bot.sendMessage(
+    chatId,
+    `📸 Detección inicial:\n\n${formatDraft(draft)}\n\nAhora escribe el *nombre* que quieres guardar (puedes usar otro diferente).`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '✏️ Corregir macros ahora', callback_data: 'ca_edit_macros' }],
+          [{ text: '❌ Cancelar', callback_data: 'menu' }],
+        ],
+      },
+    }
+  )
 }
 
 // ─── Macro summary builder ────────────────────────────────────────────────────
@@ -152,8 +279,94 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
           `📝 *Registrar comida* — Añade lo que has comido al diario de hoy.\n` +
           `📊 *Macros de hoy* — Consulta las calorías y macros acumulados hoy.\n` +
           `📅 *Historial semanal* — Ve los últimos 7 días.\n` +
-          `🍎 *Mi catálogo* — Revisa tus alimentos personales.\n\n` +
+          `🍎 *Mi catálogo* — Revisa tus alimentos personales.\n` +
+          `📸 *Añadir alimento por foto* — Detecta macros desde etiqueta y guarda corrigiendo lo que quieras.\n\n` +
           `_Puedes escribir el nombre de un alimento directamente en el chat para buscarlo rápido._`,
+        { parse_mode: 'Markdown', reply_markup: MAIN_MENU_KEYBOARD }
+      )
+      return
+    }
+
+    if (data === 'ca') {
+      await setSession(chatId, { step: 'awaiting_catalog_photo' })
+      await bot.sendMessage(
+        chatId,
+        'Envíame una *foto o captura* de la tabla nutricional del producto.',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Cancelar', callback_data: 'menu' }]] },
+        }
+      )
+      return
+    }
+
+    if (data === 'ca_edit_name') {
+      const session = await getSession(chatId)
+      if (
+        session.step !== 'awaiting_catalog_confirm' &&
+        session.step !== 'awaiting_catalog_name' &&
+        session.step !== 'awaiting_catalog_macro_edit'
+      ) {
+        await sendMainMenu(chatId)
+        return
+      }
+      await setSession(chatId, { step: 'awaiting_catalog_name', draft: session.draft })
+      await bot.sendMessage(chatId, 'Escribe el nombre que quieres para este alimento:')
+      return
+    }
+
+    if (data === 'ca_edit_macros') {
+      const session = await getSession(chatId)
+      if (
+        session.step !== 'awaiting_catalog_confirm' &&
+        session.step !== 'awaiting_catalog_name' &&
+        session.step !== 'awaiting_catalog_macro_edit'
+      ) {
+        await sendMainMenu(chatId)
+        return
+      }
+
+      await setSession(chatId, { step: 'awaiting_catalog_macro_edit', draft: session.draft })
+      await bot.sendMessage(
+        chatId,
+        'Escribe los macros por 100g en este formato:\n`kcal,proteinas,carbohidratos,grasas,fibra`\n\nEjemplo: `250,12,30,8,4`\n(Fibra es opcional)',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Cancelar', callback_data: 'menu' }]] },
+        }
+      )
+      return
+    }
+
+    if (data === 'ca_save') {
+      const session = await getSession(chatId)
+      if (session.step !== 'awaiting_catalog_confirm') {
+        await sendMainMenu(chatId)
+        return
+      }
+
+      const db = getDb()
+      const { data: id, error } = await db.rpc('bot_add_user_food', {
+        p_chat_id: chatId,
+        p_nombre: session.draft.nombre,
+        p_kcal_100g: session.draft.kcal_100g,
+        p_proteinas_100g: session.draft.proteinas_100g,
+        p_grasas_100g: session.draft.grasas_100g,
+        p_carbohidratos_100g: session.draft.carbohidratos_100g,
+        p_fibra_100g: session.draft.fibra_100g,
+      })
+
+      await setSession(chatId, { step: 'idle' })
+
+      if (error || !id) {
+        await bot.sendMessage(chatId, '❌ No he podido guardar el alimento en tu catálogo.')
+        await sendMainMenu(chatId)
+        return
+      }
+
+      await bot.sendMessage(
+        chatId,
+        `✅ Guardado en tu catálogo:\n\n${formatDraft(session.draft)}`,
         { parse_mode: 'Markdown', reply_markup: MAIN_MENU_KEYBOARD }
       )
       return
@@ -269,11 +482,23 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
 
   // ── Photo message ──
   if (msg.photo) {
-    await bot.sendMessage(
-      chatId,
-      '📸 ¡Foto recibida! El análisis de imágenes de alimentos estará disponible muy pronto.\n\nMientras tanto, puedes buscar el alimento por nombre con el botón de *Registrar comida*.',
-      { parse_mode: 'Markdown', reply_markup: MAIN_MENU_KEYBOARD }
-    )
+    const linked = await isLinked(chatId)
+    if (!linked) {
+      await bot.sendMessage(
+        chatId,
+        '🔗 Tu cuenta no está vinculada todavía. Ve al dashboard de MacrAI y haz clic en *"Conectar con Telegram"*.',
+        { parse_mode: 'Markdown' }
+      )
+      return
+    }
+
+    const largestPhoto = msg.photo[msg.photo.length - 1]
+    if (!largestPhoto?.file_id) {
+      await bot.sendMessage(chatId, 'No he podido leer esa foto. Intenta de nuevo.')
+      return
+    }
+
+    await handleCatalogPhoto(chatId, largestPhoto.file_id)
     return
   }
 
@@ -428,6 +653,56 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
         `🔥 ${kcal} kcal  ·  🥩 P: ${proteinas}g  ·  🍞 C: ${carbohidratos}g  ·  🧈 G: ${grasas}g`,
       { parse_mode: 'Markdown', reply_markup: MAIN_MENU_KEYBOARD }
     )
+    return
+  }
+
+  if (session.step === 'awaiting_catalog_name') {
+    const nombre = text.slice(0, 80).trim()
+    if (nombre.length < 2) {
+      await bot.sendMessage(chatId, 'El nombre es demasiado corto. Escribe uno válido.')
+      return
+    }
+
+    const draft: CatalogDraft = { ...session.draft, nombre }
+
+    if (
+      draft.kcal_100g === 0 &&
+      draft.proteinas_100g === 0 &&
+      draft.carbohidratos_100g === 0 &&
+      draft.grasas_100g === 0 &&
+      draft.fibra_100g === 0
+    ) {
+      await setSession(chatId, { step: 'awaiting_catalog_macro_edit', draft })
+      await bot.sendMessage(
+        chatId,
+        'Perfecto. Ahora escribe los macros por 100g en formato:\n`kcal,proteinas,carbohidratos,grasas,fibra`\nEjemplo: `250,12,30,8,4`',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Cancelar', callback_data: 'menu' }]] },
+        }
+      )
+      return
+    }
+
+    await setSession(chatId, { step: 'awaiting_catalog_confirm', draft })
+    await promptCatalogConfirm(chatId, draft)
+    return
+  }
+
+  if (session.step === 'awaiting_catalog_macro_edit') {
+    const parsed = parseMacroEditInput(text)
+    if (!parsed) {
+      await bot.sendMessage(
+        chatId,
+        'Formato no válido. Usa: `kcal,proteinas,carbohidratos,grasas,fibra`\nEjemplo: `250,12,30,8,4`',
+        { parse_mode: 'Markdown' }
+      )
+      return
+    }
+
+    const draft: CatalogDraft = { ...session.draft, ...parsed }
+    await setSession(chatId, { step: 'awaiting_catalog_confirm', draft })
+    await promptCatalogConfirm(chatId, draft)
     return
   }
 
