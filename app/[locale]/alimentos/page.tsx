@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import { useEffect } from 'react'
 import { useTranslations } from 'next-intl'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { FoodSearchCombobox } from '@/components/food/FoodSearchCombobox'
@@ -103,9 +104,9 @@ function MyFoodsCatalogue() {
     setLoading(false)
   }, [])
 
-  useState(() => {
+  useEffect(() => {
     loadFoods()
-  })
+  }, [loadFoods])
 
   async function handleAdd(values: FoodFormValues) {
     const supabase = createClient()

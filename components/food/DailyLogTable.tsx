@@ -4,7 +4,8 @@ import { useState } from 'react'
 import type { Consumo, GroupingMode } from '@/types'
 import { groupConsumos } from '@/lib/utils/grouping'
 import { Button } from '@/components/ui/button'
-import { Trash2, ChevronDown, ChevronUp } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Trash2, ChevronDown, ChevronUp, Pencil, Check, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { cn } from '@/lib/utils/cn'
 import { format } from 'date-fns'
@@ -13,13 +14,16 @@ interface Props {
   consumos: Consumo[]
   groupingMode: GroupingMode
   onDelete: (id: string) => void
+  onUpdateCantidad: (id: string, cantidadGr: number) => Promise<void>
 }
 
-export function DailyLogTable({ consumos, groupingMode, onDelete }: Props) {
+export function DailyLogTable({ consumos, groupingMode, onDelete, onUpdateCantidad }: Props) {
   const t = useTranslations('log')
   const tc = useTranslations('common')
   const tDash = useTranslations('dashboard')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editCantidad, setEditCantidad] = useState<string>('')
 
   const groups = groupConsumos(consumos, groupingMode)
 
@@ -37,6 +41,14 @@ export function DailyLogTable({ consumos, groupingMode, onDelete }: Props) {
       next.has(key) ? next.delete(key) : next.add(key)
       return next
     })
+  }
+
+  async function saveCantidad(consumo: Consumo) {
+    const next = Number(editCantidad.replace(',', '.'))
+    if (!Number.isFinite(next) || next <= 0) return
+    await onUpdateCantidad(consumo.id, next)
+    setEditingId(null)
+    setEditCantidad('')
   }
 
   return (
@@ -74,10 +86,54 @@ export function DailyLogTable({ consumos, groupingMode, onDelete }: Props) {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{consumo.nombre_alimento}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {consumo.cantidad_gr}g · {Math.round(consumo.kcal)} kcal · P:{Math.round(consumo.proteinas)}g · C:{Math.round(consumo.carbohidratos)}g · G:{Math.round(consumo.grasas)}g
-                      </p>
+                      {editingId === consumo.id ? (
+                        <div className="flex items-center gap-2 mt-1">
+                          <Input
+                            className="h-7 w-24 text-xs"
+                            value={editCantidad}
+                            onChange={(e) => setEditCantidad(e.target.value)}
+                            type="number"
+                            step="0.5"
+                            min={0.1}
+                          />
+                          <span className="text-xs text-muted-foreground">g</span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => saveCantidad(consumo)}
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => {
+                              setEditingId(null)
+                              setEditCantidad('')
+                            }}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          {consumo.cantidad_gr}g · {Math.round(consumo.kcal)} kcal · P:{Math.round(consumo.proteinas)}g · C:{Math.round(consumo.carbohidratos)}g · G:{Math.round(consumo.grasas)}g
+                        </p>
+                      )}
                     </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0"
+                      onClick={() => {
+                        setEditingId(consumo.id)
+                        setEditCantidad(String(consumo.cantidad_gr))
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
                     <Button
                       variant="ghost"
                       size="icon"

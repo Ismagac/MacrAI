@@ -84,5 +84,49 @@ export function useConsumos(fecha: string) {
     if (!err) setConsumos((prev) => prev.filter((c) => c.id !== id))
   }, [])
 
-  return { consumos, loading, error, addConsumo, deleteConsumo, refetch: fetchConsumos }
+  const updateConsumoCantidad = useCallback(async (id: string, nuevaCantidadGr: number) => {
+    if (!Number.isFinite(nuevaCantidadGr) || nuevaCantidadGr <= 0) return null
+
+    const prev = consumos.find((c) => c.id === id)
+    if (!prev || prev.cantidad_gr <= 0) return null
+
+    const factor = nuevaCantidadGr / prev.cantidad_gr
+    const payload = {
+      cantidad_gr: nuevaCantidadGr,
+      kcal: Math.round(prev.kcal * factor * 100) / 100,
+      proteinas: Math.round(prev.proteinas * factor * 100) / 100,
+      grasas: Math.round(prev.grasas * factor * 100) / 100,
+      carbohidratos: Math.round(prev.carbohidratos * factor * 100) / 100,
+      fibra: Math.round((prev.fibra ?? 0) * factor * 100) / 100,
+    }
+
+    const supabase = createClient()
+    const { data, error: err } = await supabase
+      .from('consumos')
+      .update(payload)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (err || !data) {
+      if (err) setError(err.message)
+      return null
+    }
+
+    const updated = data as Consumo
+    setConsumos((prevConsumos) =>
+      prevConsumos.map((c) => (c.id === id ? updated : c))
+    )
+    return updated
+  }, [consumos])
+
+  return {
+    consumos,
+    loading,
+    error,
+    addConsumo,
+    deleteConsumo,
+    updateConsumoCantidad,
+    refetch: fetchConsumos,
+  }
 }

@@ -29,7 +29,7 @@ export default function LogPage() {
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
   const [groupingMode, setGroupingMode] = useState<GroupingMode>('tipo_comida')
   const [modalOpen, setModalOpen] = useState(false)
-  const { consumos, addConsumo, deleteConsumo, loading } = useConsumos(fecha)
+  const { consumos, addConsumo, deleteConsumo, updateConsumoCantidad, loading } = useConsumos(fecha)
   const { objetivoDiario } = useProfile()
   const { toast } = useToast()
 
@@ -57,6 +57,16 @@ export default function LogPage() {
       toast({
         title: data.alimento.nombre,
         description: `+${m.kcal} kcal · P:${m.proteinas}g · C:${m.carbohidratos}g · G:${m.grasas}g`,
+      })
+    }
+  }
+
+  async function handleUpdateCantidad(id: string, cantidadGr: number) {
+    const updated = await updateConsumoCantidad(id, cantidadGr)
+    if (updated) {
+      toast({
+        title: updated.nombre_alimento,
+        description: `Cantidad actualizada a ${updated.cantidad_gr}g`,
       })
     }
   }
@@ -128,6 +138,7 @@ export default function LogPage() {
             consumos={consumos}
             groupingMode={groupingMode}
             onDelete={deleteConsumo}
+            onUpdateCantidad={handleUpdateCantidad}
           />
         )}
 

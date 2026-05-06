@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils/cn'
 
 interface Props {
   onSelect: (food: FoodItem) => void
+  onSuggestedQuantity?: (quantity: number | null) => void
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -28,10 +29,20 @@ const SOURCE_COLORS: Record<string, string> = {
   manual: 'bg-purple-500/10 text-purple-600 border-purple-200',
 }
 
-export function FoodSearchCombobox({ onSelect }: Props) {
+export function FoodSearchCombobox({ onSelect, onSuggestedQuantity }: Props) {
   const [query, setQuery] = useState('')
-  const { results, loading } = useFoodSearch(query)
+  const qtyMatch = query.trim().match(/^(\d+(?:[\.,]\d+)?)\s+(.+)$/)
+  const proposedQty = qtyMatch ? Number(qtyMatch[1].replace(',', '.')) : null
+  const effectiveQuery = qtyMatch ? qtyMatch[2].trim() : query
+  const { results, loading } = useFoodSearch(effectiveQuery)
   const t = useTranslations('log')
+
+  function handleSelect(food: FoodItem) {
+    onSelect(food)
+    onSuggestedQuantity?.(
+      proposedQty && Number.isFinite(proposedQty) && proposedQty > 0 ? proposedQty : null
+    )
+  }
 
   return (
     <div className="space-y-2">
@@ -64,7 +75,7 @@ export function FoodSearchCombobox({ onSelect }: Props) {
             <li key={food.id}>
               <button
                 className="w-full text-left px-3 py-2.5 hover:bg-accent transition-colors"
-                onClick={() => onSelect(food)}
+                onClick={() => handleSelect(food)}
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
@@ -72,6 +83,14 @@ export function FoodSearchCombobox({ onSelect }: Props) {
                     <p className="text-xs text-muted-foreground">
                       {food.kcal_100g} kcal · {food.proteinas_100g}g P · {food.carbohidratos_100g}g C · {food.grasas_100g}g G
                     </p>
+                    {proposedQty && Number.isFinite(proposedQty) && proposedQty > 0 && (
+                      <p className="text-xs text-primary/90">
+                        Para {proposedQty}g: {Math.round((food.kcal_100g * proposedQty) / 100)} kcal ·
+                        {' '}{Math.round((food.proteinas_100g * proposedQty) / 100 * 10) / 10}g P ·
+                        {' '}{Math.round((food.carbohidratos_100g * proposedQty) / 100 * 10) / 10}g C ·
+                        {' '}{Math.round((food.grasas_100g * proposedQty) / 100 * 10) / 10}g G
+                      </p>
+                    )}
                   </div>
                   <span
                     className={cn(

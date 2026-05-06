@@ -74,6 +74,11 @@ export function AddFoodModal({ open, onOpenChange, onSave, fecha }: Props) {
     setSelectedFood(food)
   }
 
+  function handleSuggestedQuantity(quantity: number | null) {
+    if (!quantity) return
+    setValue('cantidad_gr', quantity)
+  }
+
   async function onSubmit(values: FormValues) {
     if (!selectedFood) return
     setSaving(true)
@@ -106,7 +111,7 @@ export function AddFoodModal({ open, onOpenChange, onSave, fecha }: Props) {
         <div className="space-y-5">
           {/* Step 1: search food */}
           {!selectedFood ? (
-            <FoodSearchCombobox onSelect={handleSelectFood} />
+            <FoodSearchCombobox onSelect={handleSelectFood} onSuggestedQuantity={handleSuggestedQuantity} />
           ) : (
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               {/* Selected food */}

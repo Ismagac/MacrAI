@@ -47,16 +47,45 @@ type CatalogDraft = {
   fibra_100g: number
 }
 
+type BotSearchFood = {
+  id: string
+  nombre: string
+  kcal_100g: number
+  proteinas_100g: number
+  carbohidratos_100g: number
+  grasas_100g: number
+  fibra_100g: number
+  source: 'usuario' | 'global' | 'openfoodfacts' | 'manual'
+}
+
+type TodayEntry = {
+  id: string
+  nombre_alimento: string
+  cantidad_gr: number
+  kcal: number
+  proteinas: number
+  carbohidratos: number
+  grasas: number
+}
+
 type BotSession =
   | { step: 'idle' }
   | { step: 'selecting_meal_type' }
   | { step: 'awaiting_food_query'; mealType: MealType; mealNumber: number }
-  | { step: 'selecting_food'; mealType: MealType; mealNumber: number; foods: FoodItem[] }
+  | {
+      step: 'selecting_food'
+      mealType: MealType
+      mealNumber: number
+      foods: FoodItem[]
+      proposedQty?: number
+    }
   | { step: 'awaiting_food_qty'; mealType: MealType; mealNumber: number; food: FoodItem }
   | { step: 'awaiting_catalog_photo' }
   | { step: 'awaiting_catalog_name'; draft: CatalogDraft }
   | { step: 'awaiting_catalog_macro_edit'; draft: CatalogDraft }
   | { step: 'awaiting_catalog_confirm'; draft: CatalogDraft }
+  | { step: 'selecting_today_entry'; entries: TodayEntry[] }
+  | { step: 'awaiting_edit_qty'; entry: TodayEntry }
 
 // ─── Session helpers ──────────────────────────────────────────────────────────
 
@@ -84,6 +113,7 @@ const MAIN_MENU_KEYBOARD: TelegramBot.InlineKeyboardMarkup = {
       { text: '📅 Historial semanal', callback_data: 'hs' },
       { text: '🍎 Mi catálogo', callback_data: 'ct' },
     ],
+    [{ text: '✏️ Corregir registro de hoy', callback_data: 'ed' }],
     [{ text: '📸 Añadir alimento por foto', callback_data: 'ca' }],
     [{ text: 'ℹ️ Ayuda', callback_data: 'help' }],
   ],
@@ -178,6 +208,72 @@ async function promptCatalogConfirm(chatId: number, draft: CatalogDraft) {
       },
     }
   )
+}
+
+function parseQtyAndQuery(input: string): { qty: number | null; query: string } {
+  const m = input.trim().match(/^(\d+(?:[\.,]\d+)?)\s+(.+)$/)
+  if (!m) return { qty: null, query: input.trim() }
+  const qty = Number(m[1].replace(',', '.'))
+  if (!Number.isFinite(qty) || qty <= 0) return { qty: null, query: input.trim() }
+  return { qty, query: m[2].trim() }
+}
+
+function dedupeFoods(foods: FoodItem[]): FoodItem[] {
+  const seen = new Set<string>()
+  const normalise = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
+  const out: FoodItem[] = []
+  for (const f of foods) {
+    const key = normalise(f.nombre)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(f)
+  }
+  return out
+}
+
+async function searchFoodsMerged(chatId: number, query: string): Promise<FoodItem[]> {
+  const db = getDb()
+
+  const [dbFoodsResult, offFoods] = await Promise.all([
+    db.rpc('bot_search_foods', { p_chat_id: chatId, p_query: query, p_limit: 6 }),
+    searchOpenFoodFacts(query, 6),
+  ])
+
+  const dbFoods: FoodItem[] = ((dbFoodsResult.data ?? []) as BotSearchFood[]).map((f) => ({
+    id: f.id,
+    nombre: f.nombre,
+    kcal_100g: Number(f.kcal_100g),
+    proteinas_100g: Number(f.proteinas_100g),
+    carbohidratos_100g: Number(f.carbohidratos_100g),
+    grasas_100g: Number(f.grasas_100g),
+    fibra_100g: Number(f.fibra_100g ?? 0),
+    source: f.source,
+  }))
+
+  return dedupeFoods([...dbFoods, ...offFoods]).slice(0, 12)
+}
+
+async function sendFoodResults(
+  chatId: number,
+  foods: FoodItem[],
+  mealType: MealType,
+  mealNumber: number,
+  proposedQty?: number
+) {
+  const keyboardRows: TelegramBot.InlineKeyboardButton[][] = foods.map((f, i) => {
+    const label = proposedQty
+      ? `${f.nombre.slice(0, 28)} · ${Math.round((f.kcal_100g * proposedQty) / 100)} kcal (${proposedQty}g)`
+      : `${f.nombre.slice(0, 40)} (${f.kcal_100g} kcal/100g)`
+    return [{ text: label, callback_data: `sf:${i}` }]
+  })
+
+  keyboardRows.push([{ text: '🔍 Buscar de nuevo', callback_data: `mt:${mealType}:${mealNumber}` }])
+  keyboardRows.push([{ text: '➕ ¿No te cuadran los macros? Añádelo', callback_data: 'ca_quick' }])
+  keyboardRows.push([{ text: '« Cancelar', callback_data: 'menu' }])
+
+  await getBot().sendMessage(chatId, 'Selecciona el alimento:', {
+    reply_markup: { inline_keyboard: keyboardRows },
+  })
 }
 
 async function handleCatalogPhoto(chatId: number, fileId: string) {
@@ -300,6 +396,79 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
       return
     }
 
+    if (data === 'ca_quick') {
+      await setSession(chatId, { step: 'awaiting_catalog_photo' })
+      await bot.sendMessage(
+        chatId,
+        'Perfecto, envíame una *foto o captura* de la tabla nutricional y lo añadimos al catálogo sin salir de este flujo.',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Cancelar', callback_data: 'menu' }]] },
+        }
+      )
+      return
+    }
+
+    if (data === 'ed') {
+      const db = getDb()
+      const { data: rows } = await db.rpc('bot_list_today_consumos', { p_chat_id: chatId })
+      const entries = ((rows ?? []) as TodayEntry[]).map((r) => ({
+        ...r,
+        cantidad_gr: Number(r.cantidad_gr),
+        kcal: Number(r.kcal),
+        proteinas: Number(r.proteinas),
+        carbohidratos: Number(r.carbohidratos),
+        grasas: Number(r.grasas),
+      }))
+
+      if (entries.length === 0) {
+        await bot.sendMessage(chatId, 'No tienes registros hoy para corregir.', {
+          reply_markup: MAIN_MENU_KEYBOARD,
+        })
+        return
+      }
+
+      await setSession(chatId, { step: 'selecting_today_entry', entries })
+
+      const rowsKb: TelegramBot.InlineKeyboardButton[][] = entries.slice(0, 10).map((e, i) => [
+        {
+          text: `${e.nombre_alimento.slice(0, 28)} · ${e.cantidad_gr}g · ${Math.round(e.kcal)} kcal`,
+          callback_data: `edsel:${i}`,
+        },
+      ])
+      rowsKb.push([{ text: '« Menú principal', callback_data: 'menu' }])
+
+      await bot.sendMessage(chatId, 'Selecciona qué entrada quieres corregir:', {
+        reply_markup: { inline_keyboard: rowsKb },
+      })
+      return
+    }
+
+    if (data.startsWith('edsel:')) {
+      const idx = parseInt(data.split(':')[1], 10)
+      const session = await getSession(chatId)
+      if (session.step !== 'selecting_today_entry') {
+        await sendMainMenu(chatId)
+        return
+      }
+      const entry = session.entries[idx]
+      if (!entry) {
+        await sendMainMenu(chatId)
+        return
+      }
+
+      await setSession(chatId, { step: 'awaiting_edit_qty', entry })
+      await bot.sendMessage(
+        chatId,
+        `Entrada actual:\n*${entry.nombre_alimento}*\n${entry.cantidad_gr}g · ${Math.round(entry.kcal)} kcal\n\nEscribe la *nueva cantidad en gramos*.`,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Cancelar', callback_data: 'menu' }]] },
+        }
+      )
+      return
+    }
+
     if (data === 'ca_edit_name') {
       const session = await getSession(chatId)
       if (
@@ -410,6 +579,48 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
         await sendMainMenu(chatId)
         return
       }
+
+      if (session.proposedQty && session.proposedQty > 0) {
+        const qty = session.proposedQty
+        const factor = qty / 100
+        const kcal = Math.round(food.kcal_100g * factor * 10) / 10
+        const proteinas = Math.round(food.proteinas_100g * factor * 10) / 10
+        const grasas = Math.round(food.grasas_100g * factor * 10) / 10
+        const carbohidratos = Math.round(food.carbohidratos_100g * factor * 10) / 10
+        const fibra = Math.round((food.fibra_100g ?? 0) * factor * 10) / 10
+
+        const db = getDb()
+        const { data: newId, error } = await db.rpc('bot_log_consumo', {
+          p_chat_id: chatId,
+          p_nombre: food.nombre,
+          p_cantidad_gr: qty,
+          p_kcal: kcal,
+          p_proteinas: proteinas,
+          p_grasas: grasas,
+          p_carbohidratos: carbohidratos,
+          p_fibra: fibra,
+          p_tipo_comida: session.mealType,
+          p_numero_comida: session.mealNumber,
+          p_alimento_source: food.source,
+        })
+
+        await setSession(chatId, { step: 'idle' })
+
+        if (error || !newId) {
+          await bot.sendMessage(chatId, '❌ Hubo un error al guardar. Inténtalo de nuevo.')
+          await sendMainMenu(chatId)
+          return
+        }
+
+        await bot.sendMessage(
+          chatId,
+          `✅ *${food.nombre}* registrado (${qty}g)\n\n` +
+            `🔥 ${kcal} kcal  ·  🥩 P: ${proteinas}g  ·  🍞 C: ${carbohidratos}g  ·  🧈 G: ${grasas}g`,
+          { parse_mode: 'Markdown', reply_markup: MAIN_MENU_KEYBOARD }
+        )
+        return
+      }
+
       await setSession(chatId, {
         step: 'awaiting_food_qty',
         mealType: session.mealType,
@@ -566,16 +777,25 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
 
   // ── Awaiting food search query ──
   if (session.step === 'awaiting_food_query') {
-    const query = text
+    const parsed = parseQtyAndQuery(text)
+    const query = parsed.query
+    const proposedQty = parsed.qty ?? undefined
     await bot.sendMessage(chatId, `🔍 Buscando *${query}*...`, { parse_mode: 'Markdown' })
 
-    const foods = await searchOpenFoodFacts(query, 6)
+    const foods = await searchFoodsMerged(chatId, query)
 
     if (foods.length === 0) {
       await bot.sendMessage(
         chatId,
-        'No he encontrado resultados para ese alimento. Intenta con otro nombre.',
-        { reply_markup: { inline_keyboard: [[{ text: '« Cancelar', callback_data: 'menu' }]] } }
+        'No he encontrado resultados para ese alimento. Intenta con otro nombre o añádelo a tu catálogo.',
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '➕ ¿No te cuadran los macros? Añádelo', callback_data: 'ca_quick' }],
+              [{ text: '« Cancelar', callback_data: 'menu' }],
+            ],
+          },
+        }
       )
       return
     }
@@ -585,22 +805,10 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
       mealType: session.mealType,
       mealNumber: session.mealNumber,
       foods,
+      proposedQty,
     })
 
-    const keyboard: TelegramBot.InlineKeyboardMarkup = {
-      inline_keyboard: [
-        ...foods.map((f, i) => [
-          {
-            text: `${f.nombre.slice(0, 40)} (${f.kcal_100g} kcal/100g)`,
-            callback_data: `sf:${i}`,
-          },
-        ]),
-        [{ text: '🔍 Buscar de nuevo', callback_data: `mt:${session.mealType}:${session.mealNumber}` }],
-        [{ text: '« Cancelar', callback_data: 'menu' }],
-      ],
-    }
-
-    await bot.sendMessage(chatId, 'Selecciona el alimento:', { reply_markup: keyboard })
+    await sendFoodResults(chatId, foods, session.mealType, session.mealNumber, proposedQty)
     return
   }
 
@@ -706,14 +914,52 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
     return
   }
 
+  if (session.step === 'awaiting_edit_qty') {
+    const qty = Number(text.replace(',', '.'))
+    if (!Number.isFinite(qty) || qty <= 0 || qty > 5000) {
+      await bot.sendMessage(chatId, 'Cantidad no válida. Escribe solo gramos, por ejemplo: 180')
+      return
+    }
+
+    const db = getDb()
+    const { data: updatedId } = await db.rpc('bot_update_consumo_qty', {
+      p_chat_id: chatId,
+      p_consumo_id: session.entry.id,
+      p_new_qty: qty,
+    })
+
+    await setSession(chatId, { step: 'idle' })
+
+    if (!updatedId) {
+      await bot.sendMessage(chatId, '❌ No he podido actualizar esa entrada.')
+      await sendMainMenu(chatId)
+      return
+    }
+
+    await bot.sendMessage(
+      chatId,
+      `✅ Cantidad actualizada: *${session.entry.nombre_alimento}* ahora son *${qty}g*.`,
+      { parse_mode: 'Markdown', reply_markup: MAIN_MENU_KEYBOARD }
+    )
+    return
+  }
+
   // ── Default: treat free text as food search from main menu ──
   await setSession(chatId, { step: 'awaiting_food_query', mealType: 'otro', mealNumber: 1 })
   // Re-process as food search
-  await bot.sendMessage(chatId, `🔍 Buscando *${text}*...`, { parse_mode: 'Markdown' })
+  const parsed = parseQtyAndQuery(text)
+  await bot.sendMessage(chatId, `🔍 Buscando *${parsed.query}*...`, { parse_mode: 'Markdown' })
 
-  const foods = await searchOpenFoodFacts(text, 6)
+  const foods = await searchFoodsMerged(chatId, parsed.query)
   if (foods.length === 0) {
-    await sendMainMenu(chatId, 'Sin resultados. ¿Qué quieres hacer?')
+    await bot.sendMessage(chatId, 'Sin resultados. ¿Qué quieres hacer?', {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '➕ ¿No te cuadran los macros? Añádelo', callback_data: 'ca_quick' }],
+          [{ text: '« Menú principal', callback_data: 'menu' }],
+        ],
+      },
+    })
     return
   }
 
@@ -722,20 +968,10 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
     mealType: 'otro',
     mealNumber: 1,
     foods,
+    proposedQty: parsed.qty ?? undefined,
   })
 
-  const keyboard: TelegramBot.InlineKeyboardMarkup = {
-    inline_keyboard: [
-      ...foods.map((f, i) => [
-        {
-          text: `${f.nombre.slice(0, 40)} (${f.kcal_100g} kcal/100g)`,
-          callback_data: `sf:${i}`,
-        },
-      ]),
-      [{ text: '« Cancelar', callback_data: 'menu' }],
-    ],
-  }
-  await bot.sendMessage(chatId, 'Selecciona el alimento:', { reply_markup: keyboard })
+  await sendFoodResults(chatId, foods, 'otro', 1, parsed.qty ?? undefined)
 }
 
 // ─── Macros today handler ────────────────────────────────────────────────────
