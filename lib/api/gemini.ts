@@ -344,8 +344,14 @@ Reglas:
 
     let { proteins, fats, carbs, calories } = extractMacros(responseText, parsed);
 
-    // Segundo intento más permisivo si no se pudo extraer ningún macro
-    if (!hasAnyMacro({ proteins, fats, carbs, calories })) {
+    const hasAllMacros =
+      proteins !== undefined &&
+      fats !== undefined &&
+      carbs !== undefined &&
+      calories !== undefined
+
+    // Segundo intento más permisivo si falta cualquier macro (misma prioridad para todos)
+    if (!hasAllMacros) {
       const recoveryPrompt = `Lee la etiqueta nutricional de la imagen y devuelve SOLO uno de estos formatos:
 1) JSON válido con keys proteins, fats, carbs, calories
 o
@@ -361,10 +367,10 @@ Si un valor no se ve, usa null.`;
       responseText = second.responseText || responseText;
       parsed = second.parsed;
       const secondMacros = extractMacros(responseText, parsed);
-      proteins = secondMacros.proteins;
-      fats = secondMacros.fats;
-      carbs = secondMacros.carbs;
-      calories = secondMacros.calories;
+      proteins = proteins ?? secondMacros.proteins;
+      fats = fats ?? secondMacros.fats;
+      carbs = carbs ?? secondMacros.carbs;
+      calories = calories ?? secondMacros.calories;
     }
 
     if (!hasAnyMacro({ proteins, fats, carbs, calories })) {
