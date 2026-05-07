@@ -372,6 +372,27 @@ async function handleCatalogPhoto(chatId: number, fileId: string) {
   )
 }
 
+function pickBestPhotoVariant(photos: TelegramBot.PhotoSize[]): TelegramBot.PhotoSize | null {
+  if (!photos || photos.length === 0) return null
+
+  // Telegram sends photo variants sorted by size. We pick the best balance:
+  // prefer <= 1.5MB (faster + cheaper) while keeping high resolution.
+  const sorted = [...photos].sort((a, b) => {
+    const aPixels = (a.width ?? 0) * (a.height ?? 0)
+    const bPixels = (b.width ?? 0) * (b.height ?? 0)
+    return aPixels - bPixels
+  })
+
+  const underLimit = sorted.filter((p) => (p.file_size ?? 0) > 0 && (p.file_size ?? 0) <= 1_500_000)
+  if (underLimit.length > 0) {
+    return underLimit[underLimit.length - 1]
+  }
+
+  // Fallback: if no file_size metadata or all are larger, use middle-high variant.
+  const idx = Math.max(0, sorted.length - 2)
+  return sorted[idx] ?? sorted[sorted.length - 1]
+}
+
 // ─── Macro summary builder ────────────────────────────────────────────────────
 
 function buildMacroBar(value: number, goal: number | null): string {
@@ -811,13 +832,13 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
       return
     }
 
-    const largestPhoto = msg.photo[msg.photo.length - 1]
-    if (!largestPhoto?.file_id) {
+    const selectedPhoto = pickBestPhotoVariant(msg.photo)
+    if (!selectedPhoto?.file_id) {
       await bot.sendMessage(chatId, 'No he podido leer esa foto. Intenta de nuevo.')
       return
     }
 
-    await handleCatalogPhoto(chatId, largestPhoto.file_id)
+    await handleCatalogPhoto(chatId, selectedPhoto.file_id)
     return
   }
 

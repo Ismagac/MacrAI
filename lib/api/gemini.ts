@@ -1,9 +1,25 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "");
-const GEMINI_MODEL_CANDIDATES = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-latest"];
+
+const PREFERRED_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash-latest",
+];
+
+const LIST_MODELS_TIMEOUT_MS = 2500;
 const GEMINI_MODEL_TIMEOUT_MS = 7000;
 const GEMINI_TOTAL_TIMEOUT_MS = 20000;
+
+type CachedModels = {
+  expiresAt: number;
+  models: string[];
+};
+
+let modelCache: CachedModels | null = null;
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -25,20 +41,84 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
 
 function shouldTryNextModel(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
+  const normalized = msg.toLowerCase();
   return (
-    msg.includes("404") ||
-    msg.includes("not found") ||
-    msg.includes("not supported") ||
-    msg.includes("is not found for API version")
+    normalized.includes("404") ||
+    normalized.includes("not found") ||
+    normalized.includes("not supported") ||
+    normalized.includes("is not found for api version") ||
+    normalized.includes("permission") ||
+    normalized.includes("quota") ||
+    normalized.includes("429")
   );
 }
 
-async function generateWithModelFallback(parts: Array<{ inlineData: { data: string; mimeType: string } } | string>) {
-  let lastError: unknown = null;
+async function listAvailableGenerateModels(apiKey: string): Promise<string[]> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
+  const response = await withTimeout(fetch(url), LIST_MODELS_TIMEOUT_MS, "Gemini listModels");
+  if (!response.ok) {
+    throw new Error(`listModels failed with HTTP ${response.status}`);
+  }
 
-  for (const modelName of GEMINI_MODEL_CANDIDATES) {
+  const body = (await response.json()) as {
+    models?: Array<{
+      name?: string;
+      supportedGenerationMethods?: string[];
+    }>;
+  };
+
+  const available = (body.models ?? [])
+    .filter((m) => (m.supportedGenerationMethods ?? []).includes("generateContent"))
+    .map((m) => (m.name ?? "").replace(/^models\//, ""))
+    .filter(Boolean);
+
+  return available;
+}
+
+async function getModelCandidates(): Promise<string[]> {
+  const now = Date.now();
+  if (modelCache && modelCache.expiresAt > now && modelCache.models.length > 0) {
+    return modelCache.models;
+  }
+
+  const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey) return PREFERRED_MODELS;
+
+  try {
+    const available = await listAvailableGenerateModels(apiKey);
+    const ranked = [
+      ...PREFERRED_MODELS.filter((m) => available.includes(m)),
+      ...available.filter((m) => !PREFERRED_MODELS.includes(m) && m.includes("flash")),
+    ];
+
+    const models = ranked.length > 0 ? ranked : PREFERRED_MODELS;
+    modelCache = {
+      models,
+      expiresAt: now + 30 * 60 * 1000,
+    };
+    return models;
+  } catch {
+    return PREFERRED_MODELS;
+  }
+}
+
+async function generateWithModelFallback(
+  parts: Array<{ inlineData: { data: string; mimeType: string } } | string>
+) {
+  let lastError: unknown = null;
+  const candidates = await getModelCandidates();
+
+  for (const modelName of candidates) {
     try {
-      const model = genAI.getGenerativeModel({ model: modelName });
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        generationConfig: {
+          temperature: 0.1,
+          topP: 0.1,
+          maxOutputTokens: 400,
+        },
+      });
+
       const response = await withTimeout(
         model.generateContent(parts),
         GEMINI_MODEL_TIMEOUT_MS,
@@ -54,6 +134,72 @@ async function generateWithModelFallback(parts: Array<{ inlineData: { data: stri
   }
 
   throw lastError ?? new Error("No Gemini model available");
+}
+
+function normalizeImageInput(imageData: string | Buffer): { base64Image: string; mimeType: string } {
+  if (Buffer.isBuffer(imageData)) {
+    return { base64Image: imageData.toString("base64"), mimeType: "image/jpeg" };
+  }
+
+  if (typeof imageData === "string" && imageData.startsWith("data:")) {
+    const [header, payload = ""] = imageData.split(",");
+    const mimeMatch = header.match(/^data:([^;]+);base64$/i);
+    return {
+      base64Image: payload,
+      mimeType: mimeMatch?.[1] || "image/jpeg",
+    };
+  }
+
+  return { base64Image: imageData, mimeType: "image/jpeg" };
+}
+
+function extractJsonObject(text: string): string | null {
+  const fencedMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fencedMatch?.[1]) {
+    const candidate = fencedMatch[1].trim();
+    const braces = candidate.match(/\{[\s\S]*\}/);
+    if (braces?.[0]) return braces[0];
+  }
+
+  const direct = text.match(/\{[\s\S]*\}/);
+  return direct?.[0] ?? null;
+}
+
+function coerceNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string") {
+    const cleaned = value.replace(",", ".").match(/-?\d+(?:\.\d+)?/);
+    if (!cleaned) return undefined;
+    const num = Number(cleaned[0]);
+    return Number.isFinite(num) ? num : undefined;
+  }
+
+  return undefined;
+}
+
+function normalizeBasis(value: unknown): "per_100g" | "per_unit" {
+  if (typeof value !== "string") return "per_100g";
+  const v = value.toLowerCase();
+  if (v.includes("unit") || v.includes("unidad") || v.includes("portion") || v.includes("porcion")) {
+    return "per_unit";
+  }
+  return "per_100g";
+}
+
+function fallbackFromText(text: string): Partial<MacroDetectionResult> {
+  const find = (regex: RegExp) => {
+    const m = text.match(regex);
+    return coerceNumber(m?.[1]);
+  };
+
+  return {
+    proteins: find(/(?:proteins?|prote[ií]nas?)\D{0,15}(\d+(?:[\.,]\d+)?)/i),
+    fats: find(/(?:fats?|grasas?)\D{0,15}(\d+(?:[\.,]\d+)?)/i),
+    carbs: find(/(?:carbs?|carbohidratos?)\D{0,20}(\d+(?:[\.,]\d+)?)/i),
+    calories: find(/(?:kcal|calor[ií]as?)\D{0,15}(\d+(?:[\.,]\d+)?)/i),
+  };
 }
 
 export interface MacroDetectionResult {
@@ -85,46 +231,34 @@ export async function detectMacrosFromImage(
       };
     }
 
-    // Convertir imagen a base64 si es Buffer
-    let base64Image: string;
-    if (Buffer.isBuffer(imageData)) {
-      base64Image = imageData.toString("base64");
-    } else if (typeof imageData === "string" && imageData.startsWith("data:")) {
-      // Si ya es data URI, extraer la parte base64
-      base64Image = imageData.split(",")[1];
-    } else {
-      base64Image = imageData;
-    }
+    const { base64Image, mimeType } = normalizeImageInput(imageData);
 
-    const prompt = `Analiza esta imagen de comida/etiqueta nutricional y extrae la siguiente información:
+    const prompt = `Extrae macros nutricionales de esta imagen.
 
-1. Nombre del alimento/producto
-2. Si los datos nutricionales son por 100g o por unidad (especifica cuál unidad: 1 helado, 1 galleta, 1 porción, etc.)
-3. Proteínas (en gramos)
-4. Grasas (en gramos)
-5. Carbohidratos (en gramos)
-6. Calorías (opcional)
-
-Responde en este formato JSON exacto (sin explicaciones adicionales):
+Devuelve SOLO JSON válido con este esquema exacto:
 {
-  "foodName": "nombre del alimento",
-  "basis": "per_100g" o "per_unit",
-  "unitName": "especificar si es per_unit (ej: 1 helado, 1 galleta, 1 porción)",
-  "proteins": número,
-  "fats": número,
-  "carbs": número,
-  "calories": número o null,
-  "confidence": número entre 0 y 1
+  "foodName": "string",
+  "basis": "per_100g" | "per_unit",
+  "unitName": "string o null",
+  "proteins": number | null,
+  "fats": number | null,
+  "carbs": number | null,
+  "calories": number | null,
+  "confidence": number
 }
 
-Si no puedes determinar algún valor, usa null. Sé lo más preciso posible.`;
+Reglas:
+- Usa números en gramos para proteins/fats/carbs.
+- Si dudas entre porción/unidad o 100g, indica la más probable.
+- Si un valor no es legible, usa null.
+- No añadas texto fuera del JSON.`;
 
     const response = await withTimeout(
       generateWithModelFallback([
         {
           inlineData: {
             data: base64Image,
-            mimeType: "image/jpeg",
+            mimeType,
           },
         },
         prompt,
@@ -133,8 +267,7 @@ Si no puedes determinar algún valor, usa null. Sé lo más preciso posible.`;
       "Gemini macro detection"
     );
 
-    const responseText =
-      response.response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const responseText = response.response.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
     if (!responseText) {
       return {
@@ -143,28 +276,47 @@ Si no puedes determinar algún valor, usa null. Sé lo más preciso posible.`;
       };
     }
 
-    // Extraer JSON de la respuesta
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
+    const jsonChunk = extractJsonObject(responseText);
+    let parsed: Record<string, unknown> = {};
+
+    if (jsonChunk) {
+      try {
+        parsed = JSON.parse(jsonChunk) as Record<string, unknown>;
+      } catch {
+        parsed = {};
+      }
+    }
+
+    const fallback = fallbackFromText(responseText);
+
+    const proteins = coerceNumber(parsed.proteins) ?? fallback.proteins;
+    const fats = coerceNumber(parsed.fats) ?? fallback.fats;
+    const carbs = coerceNumber(parsed.carbs) ?? fallback.carbs;
+    const calories = coerceNumber(parsed.calories) ?? fallback.calories;
+
+    if (
+      proteins === undefined &&
+      fats === undefined &&
+      carbs === undefined &&
+      calories === undefined
+    ) {
       return {
         success: false,
-        error: "Could not parse Gemini response as JSON",
+        error: "No pude extraer macros de la respuesta del modelo",
         rawResponse: responseText,
       };
     }
 
-    const parsed = JSON.parse(jsonMatch[0]);
-
     return {
       success: true,
-      foodName: parsed.foodName || undefined,
-      proteins: parsed.proteins || undefined,
-      fats: parsed.fats || undefined,
-      carbs: parsed.carbs || undefined,
-      calories: parsed.calories || undefined,
-      basis: parsed.basis || "per_100g",
-      unitName: parsed.unitName || undefined,
-      confidence: parsed.confidence || 0.8,
+      foodName: (typeof parsed.foodName === "string" && parsed.foodName.trim()) || "Nuevo alimento",
+      proteins,
+      fats,
+      carbs,
+      calories,
+      basis: normalizeBasis(parsed.basis),
+      unitName: typeof parsed.unitName === "string" ? parsed.unitName : undefined,
+      confidence: coerceNumber(parsed.confidence) ?? 0.75,
       rawResponse: responseText,
     };
   } catch (error) {
@@ -193,38 +345,44 @@ export async function isNutritionLabel(imageData: string | Buffer): Promise<{
       return { isLabel: false, confidence: 0 };
     }
 
-    let base64Image: string;
-    if (Buffer.isBuffer(imageData)) {
-      base64Image = imageData.toString("base64");
-    } else if (typeof imageData === "string" && imageData.startsWith("data:")) {
-      base64Image = imageData.split(",")[1];
-    } else {
-      base64Image = imageData;
-    }
+    const { base64Image, mimeType } = normalizeImageInput(imageData);
 
     const response = await withTimeout(
       generateWithModelFallback([
         {
           inlineData: {
             data: base64Image,
-            mimeType: "image/jpeg",
+            mimeType,
           },
         },
-        "¿Esta imagen contiene una etiqueta nutricional legible, información de macros de comida, o es una foto de comida? Responde solo con JSON: {\"isLabel\": boolean, \"confidence\": 0-1, \"description\": \"breve descripción\"}",
+        '¿Esta imagen contiene una etiqueta nutricional legible o datos de macros? Responde SOLO JSON: {"isLabel": boolean, "confidence": number, "description": "string"}',
       ]),
       GEMINI_TOTAL_TIMEOUT_MS,
       "Gemini nutrition-label detection"
     );
 
-    const responseText =
-      response.response.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    const responseText = response.response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const jsonChunk = extractJsonObject(responseText);
 
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+    if (!jsonChunk) {
+      return { isLabel: false, confidence: 0, description: "No JSON" };
     }
 
-    return { isLabel: false, confidence: 0 };
+    try {
+      const parsed = JSON.parse(jsonChunk) as {
+        isLabel?: boolean;
+        confidence?: number | string;
+        description?: string;
+      };
+
+      return {
+        isLabel: Boolean(parsed.isLabel),
+        confidence: coerceNumber(parsed.confidence) ?? 0,
+        description: parsed.description,
+      };
+    } catch {
+      return { isLabel: false, confidence: 0, description: "JSON inválido" };
+    }
   } catch (error) {
     console.error("Error in isNutritionLabel:", error);
     return { isLabel: false, confidence: 0 };
