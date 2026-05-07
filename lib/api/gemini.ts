@@ -195,10 +195,10 @@ function fallbackFromText(text: string): Partial<MacroDetectionResult> {
   };
 
   return {
-    proteins: find(/(?:proteins?|prote[ií]nas?)\D{0,15}(\d+(?:[\.,]\d+)?)/i),
-    fats: find(/(?:fats?|grasas?)\D{0,15}(\d+(?:[\.,]\d+)?)/i),
-    carbs: find(/(?:carbs?|carbohidratos?)\D{0,20}(\d+(?:[\.,]\d+)?)/i),
-    calories: find(/(?:kcal|calor[ií]as?)\D{0,15}(\d+(?:[\.,]\d+)?)/i),
+    proteins: find(/(?:proteins?|protein|prote[ií]nas?)\D{0,25}(\d+(?:[\.,]\d+)?)/i),
+    fats: find(/(?:fats?|fat|grasas?(?:\s+totales?)?)\D{0,25}(\d+(?:[\.,]\d+)?)/i),
+    carbs: find(/(?:carbs?|carbohydrates?|carbohidratos?|hidratos?(?:\s+de\s+carbono)?)\D{0,30}(\d+(?:[\.,]\d+)?)/i),
+    calories: find(/(?:valor\s+energ[eé]tico|energy|kcal|calor[ií]as?)\D{0,30}(\d+(?:[\.,]\d+)?)(?:\s*kcal)?/i),
   };
 }
 
@@ -215,9 +215,26 @@ function parseKeyValueMacros(text: string): Partial<MacroDetectionResult> {
 
   return {
     proteins: findKV(["proteins", "protein", "proteinas", "proteina"]),
-    fats: findKV(["fats", "fat", "grasas", "grasa"]),
-    carbs: findKV(["carbs", "carbohydrates", "carbohidratos"]),
-    calories: findKV(["calories", "kcal", "calorias", "calorias"]),
+    fats: findKV(["fats", "fat", "grasas", "grasa", "grasas_totales"]),
+    carbs: findKV(["carbs", "carbohydrates", "carbohidratos", "hidratos", "hidratos_de_carbono"]),
+    calories: findKV(["calories", "kcal", "calorias", "calorías", "valor_energetico", "energia"]),
+  };
+}
+
+function fromJsonAliases(obj: Record<string, unknown>): Partial<MacroDetectionResult> {
+  const pick = (...keys: string[]) => {
+    for (const key of keys) {
+      const val = coerceNumber(obj[key]);
+      if (val !== undefined) return val;
+    }
+    return undefined;
+  };
+
+  return {
+    proteins: pick("proteins", "protein", "proteinas", "proteina", "prot"),
+    fats: pick("fats", "fat", "grasas", "grasa", "grasas_totales"),
+    carbs: pick("carbs", "carbohydrates", "carbohidratos", "hidratos", "hidratos_de_carbono"),
+    calories: pick("calories", "kcal", "calorias", "calorias", "calorías", "energia", "valor_energetico"),
   };
 }
 
@@ -332,13 +349,14 @@ Reglas:
     }
 
     const extractMacros = (rawText: string, obj: Record<string, unknown>) => {
+      const aliases = fromJsonAliases(obj);
       const fallback = fallbackFromText(rawText);
       const kv = parseKeyValueMacros(rawText);
       return {
-        proteins: coerceNumber(obj.proteins) ?? kv.proteins ?? fallback.proteins,
-        fats: coerceNumber(obj.fats) ?? kv.fats ?? fallback.fats,
-        carbs: coerceNumber(obj.carbs) ?? kv.carbs ?? fallback.carbs,
-        calories: coerceNumber(obj.calories) ?? kv.calories ?? fallback.calories,
+        proteins: coerceNumber(obj.proteins) ?? aliases.proteins ?? kv.proteins ?? fallback.proteins,
+        fats: coerceNumber(obj.fats) ?? aliases.fats ?? kv.fats ?? fallback.fats,
+        carbs: coerceNumber(obj.carbs) ?? aliases.carbs ?? kv.carbs ?? fallback.carbs,
+        calories: coerceNumber(obj.calories) ?? aliases.calories ?? kv.calories ?? fallback.calories,
       };
     };
 
