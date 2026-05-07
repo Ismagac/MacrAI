@@ -1,6 +1,36 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "");
+const GEMINI_MODEL_CANDIDATES = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-latest"];
+
+function shouldTryNextModel(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    msg.includes("404") ||
+    msg.includes("not found") ||
+    msg.includes("not supported") ||
+    msg.includes("is not found for API version")
+  );
+}
+
+async function generateWithModelFallback(parts: Array<{ inlineData: { data: string; mimeType: string } } | string>) {
+  let lastError: unknown = null;
+
+  for (const modelName of GEMINI_MODEL_CANDIDATES) {
+    try {
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const response = await model.generateContent(parts);
+      return response;
+    } catch (error) {
+      lastError = error;
+      if (!shouldTryNextModel(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError ?? new Error("No Gemini model available");
+}
 
 export interface MacroDetectionResult {
   success: boolean;
@@ -30,8 +60,6 @@ export async function detectMacrosFromImage(
         error: "GOOGLE_API_KEY not configured",
       };
     }
-
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     // Convertir imagen a base64 si es Buffer
     let base64Image: string;
@@ -67,7 +95,7 @@ Responde en este formato JSON exacto (sin explicaciones adicionales):
 
 Si no puedes determinar algún valor, usa null. Sé lo más preciso posible.`;
 
-    const response = await model.generateContent([
+    const response = await generateWithModelFallback([
       {
         inlineData: {
           data: base64Image,
@@ -133,8 +161,6 @@ export async function isNutritionLabel(imageData: string | Buffer): Promise<{
       return { isLabel: false, confidence: 0 };
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
     let base64Image: string;
     if (Buffer.isBuffer(imageData)) {
       base64Image = imageData.toString("base64");
@@ -144,7 +170,7 @@ export async function isNutritionLabel(imageData: string | Buffer): Promise<{
       base64Image = imageData;
     }
 
-    const response = await model.generateContent([
+    const response = await generateWithModelFallback([
       {
         inlineData: {
           data: base64Image,
