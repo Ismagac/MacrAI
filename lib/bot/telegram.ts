@@ -306,11 +306,25 @@ async function handleCatalogPhoto(chatId: number, fileId: string) {
 
   const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`
 
-  // Descargar la imagen
-  const response = await fetch(fileUrl)
-  const buffer = Buffer.from(await response.arrayBuffer())
+  // Descargar la imagen con timeout para no bloquear el flujo
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 10000)
+  let buffer: Buffer
+  try {
+    const response = await fetch(fileUrl, { signal: controller.signal })
+    if (!response.ok) {
+      await bot.sendMessage(chatId, 'No pude descargar la foto de Telegram. Inténtalo de nuevo.')
+      return
+    }
+    buffer = Buffer.from(await response.arrayBuffer())
+  } catch {
+    await bot.sendMessage(chatId, 'La descarga de la foto tardó demasiado. Prueba de nuevo con otra imagen.')
+    return
+  } finally {
+    clearTimeout(timeout)
+  }
 
-  await bot.sendMessage(chatId, '🤖 Analizando con IA... esto tardará unos segundos.')
+  await bot.sendMessage(chatId, '🤖 Analizando con IA... máximo ~20s. Si no, pasamos a modo manual.')
   const detected = await detectMacrosFromImage(buffer)
 
   if (!detected.success || !detected.proteins) {

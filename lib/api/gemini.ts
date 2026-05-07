@@ -2,6 +2,26 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "");
 const GEMINI_MODEL_CANDIDATES = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-latest"];
+const GEMINI_MODEL_TIMEOUT_MS = 7000;
+const GEMINI_TOTAL_TIMEOUT_MS = 20000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
 
 function shouldTryNextModel(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
@@ -19,7 +39,11 @@ async function generateWithModelFallback(parts: Array<{ inlineData: { data: stri
   for (const modelName of GEMINI_MODEL_CANDIDATES) {
     try {
       const model = genAI.getGenerativeModel({ model: modelName });
-      const response = await model.generateContent(parts);
+      const response = await withTimeout(
+        model.generateContent(parts),
+        GEMINI_MODEL_TIMEOUT_MS,
+        `Gemini model ${modelName}`
+      );
       return response;
     } catch (error) {
       lastError = error;
@@ -95,15 +119,19 @@ Responde en este formato JSON exacto (sin explicaciones adicionales):
 
 Si no puedes determinar algún valor, usa null. Sé lo más preciso posible.`;
 
-    const response = await generateWithModelFallback([
-      {
-        inlineData: {
-          data: base64Image,
-          mimeType: "image/jpeg",
+    const response = await withTimeout(
+      generateWithModelFallback([
+        {
+          inlineData: {
+            data: base64Image,
+            mimeType: "image/jpeg",
+          },
         },
-      },
-      prompt,
-    ]);
+        prompt,
+      ]),
+      GEMINI_TOTAL_TIMEOUT_MS,
+      "Gemini macro detection"
+    );
 
     const responseText =
       response.response.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -141,9 +169,13 @@ Si no puedes determinar algún valor, usa null. Sé lo más preciso posible.`;
     };
   } catch (error) {
     console.error("Error in detectMacrosFromImage:", error);
+    const msg = error instanceof Error ? error.message : "Unknown error";
+    const isTimeout = msg.toLowerCase().includes("timed out");
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: isTimeout
+        ? "Tiempo de espera agotado analizando la imagen. Prueba con una foto más recortada o mejor iluminada."
+        : msg,
     };
   }
 }
@@ -170,15 +202,19 @@ export async function isNutritionLabel(imageData: string | Buffer): Promise<{
       base64Image = imageData;
     }
 
-    const response = await generateWithModelFallback([
-      {
-        inlineData: {
-          data: base64Image,
-          mimeType: "image/jpeg",
+    const response = await withTimeout(
+      generateWithModelFallback([
+        {
+          inlineData: {
+            data: base64Image,
+            mimeType: "image/jpeg",
+          },
         },
-      },
-      "¿Esta imagen contiene una etiqueta nutricional legible, información de macros de comida, o es una foto de comida? Responde solo con JSON: {\"isLabel\": boolean, \"confidence\": 0-1, \"description\": \"breve descripción\"}",
-    ]);
+        "¿Esta imagen contiene una etiqueta nutricional legible, información de macros de comida, o es una foto de comida? Responde solo con JSON: {\"isLabel\": boolean, \"confidence\": 0-1, \"description\": \"breve descripción\"}",
+      ]),
+      GEMINI_TOTAL_TIMEOUT_MS,
+      "Gemini nutrition-label detection"
+    );
 
     const responseText =
       response.response.candidates?.[0]?.content?.parts?.[0]?.text || "";
