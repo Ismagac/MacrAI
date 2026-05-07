@@ -327,7 +327,13 @@ async function handleCatalogPhoto(chatId: number, fileId: string) {
   await bot.sendMessage(chatId, '🤖 Analizando con IA... máximo ~20s. Si no, pasamos a modo manual.')
   const detected = await detectMacrosFromImage(buffer)
 
-  if (!detected.success || !detected.proteins) {
+  const hasDetectedMacros =
+    detected.proteins !== undefined ||
+    detected.fats !== undefined ||
+    detected.carbs !== undefined ||
+    detected.calories !== undefined
+
+  if (!detected.success || !hasDetectedMacros) {
     const draft: CatalogDraft = {
       nombre: 'Nuevo alimento',
       kcal_100g: 0,

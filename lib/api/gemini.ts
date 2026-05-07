@@ -202,6 +202,73 @@ function fallbackFromText(text: string): Partial<MacroDetectionResult> {
   };
 }
 
+function parseKeyValueMacros(text: string): Partial<MacroDetectionResult> {
+  const findKV = (keys: string[]) => {
+    for (const key of keys) {
+      const re = new RegExp(`${key}\\s*[:=]\\s*(-?\\d+(?:[\\.,]\\d+)?)`, "i");
+      const match = text.match(re);
+      const value = coerceNumber(match?.[1]);
+      if (value !== undefined) return value;
+    }
+    return undefined;
+  };
+
+  return {
+    proteins: findKV(["proteins", "protein", "proteinas", "proteina"]),
+    fats: findKV(["fats", "fat", "grasas", "grasa"]),
+    carbs: findKV(["carbs", "carbohydrates", "carbohidratos"]),
+    calories: findKV(["calories", "kcal", "calorias", "calorias"]),
+  };
+}
+
+function hasAnyMacro(values: {
+  proteins?: number;
+  fats?: number;
+  carbs?: number;
+  calories?: number;
+}): boolean {
+  return (
+    values.proteins !== undefined ||
+    values.fats !== undefined ||
+    values.carbs !== undefined ||
+    values.calories !== undefined
+  );
+}
+
+async function runPrompt(
+  base64Image: string,
+  mimeType: string,
+  prompt: string
+): Promise<{ parsed: Record<string, unknown>; responseText: string }> {
+  const response = await withTimeout(
+    generateWithModelFallback([
+      {
+        inlineData: {
+          data: base64Image,
+          mimeType,
+        },
+      },
+      prompt,
+    ]),
+    GEMINI_TOTAL_TIMEOUT_MS,
+    "Gemini macro detection"
+  );
+
+  const responseText = response.response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  const jsonChunk = extractJsonObject(responseText);
+  let parsed: Record<string, unknown> = {};
+
+  if (jsonChunk) {
+    try {
+      parsed = JSON.parse(jsonChunk) as Record<string, unknown>;
+    } catch {
+      parsed = {};
+    }
+  }
+
+  return { parsed, responseText };
+}
+
 export interface MacroDetectionResult {
   success: boolean;
   foodName?: string;
@@ -253,21 +320,9 @@ Reglas:
 - Si un valor no es legible, usa null.
 - No añadas texto fuera del JSON.`;
 
-    const response = await withTimeout(
-      generateWithModelFallback([
-        {
-          inlineData: {
-            data: base64Image,
-            mimeType,
-          },
-        },
-        prompt,
-      ]),
-      GEMINI_TOTAL_TIMEOUT_MS,
-      "Gemini macro detection"
-    );
-
-    const responseText = response.response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const first = await runPrompt(base64Image, mimeType, prompt);
+    let responseText = first.responseText;
+    let parsed = first.parsed;
 
     if (!responseText) {
       return {
@@ -276,30 +331,43 @@ Reglas:
       };
     }
 
-    const jsonChunk = extractJsonObject(responseText);
-    let parsed: Record<string, unknown> = {};
+    const extractMacros = (rawText: string, obj: Record<string, unknown>) => {
+      const fallback = fallbackFromText(rawText);
+      const kv = parseKeyValueMacros(rawText);
+      return {
+        proteins: coerceNumber(obj.proteins) ?? kv.proteins ?? fallback.proteins,
+        fats: coerceNumber(obj.fats) ?? kv.fats ?? fallback.fats,
+        carbs: coerceNumber(obj.carbs) ?? kv.carbs ?? fallback.carbs,
+        calories: coerceNumber(obj.calories) ?? kv.calories ?? fallback.calories,
+      };
+    };
 
-    if (jsonChunk) {
-      try {
-        parsed = JSON.parse(jsonChunk) as Record<string, unknown>;
-      } catch {
-        parsed = {};
-      }
+    let { proteins, fats, carbs, calories } = extractMacros(responseText, parsed);
+
+    // Segundo intento más permisivo si no se pudo extraer ningún macro
+    if (!hasAnyMacro({ proteins, fats, carbs, calories })) {
+      const recoveryPrompt = `Lee la etiqueta nutricional de la imagen y devuelve SOLO uno de estos formatos:
+1) JSON válido con keys proteins, fats, carbs, calories
+o
+2) texto plano exacto con líneas:
+proteins=<numero>
+fats=<numero>
+carbs=<numero>
+calories=<numero>
+
+Si un valor no se ve, usa null.`;
+
+      const second = await runPrompt(base64Image, mimeType, recoveryPrompt);
+      responseText = second.responseText || responseText;
+      parsed = second.parsed;
+      const secondMacros = extractMacros(responseText, parsed);
+      proteins = secondMacros.proteins;
+      fats = secondMacros.fats;
+      carbs = secondMacros.carbs;
+      calories = secondMacros.calories;
     }
 
-    const fallback = fallbackFromText(responseText);
-
-    const proteins = coerceNumber(parsed.proteins) ?? fallback.proteins;
-    const fats = coerceNumber(parsed.fats) ?? fallback.fats;
-    const carbs = coerceNumber(parsed.carbs) ?? fallback.carbs;
-    const calories = coerceNumber(parsed.calories) ?? fallback.calories;
-
-    if (
-      proteins === undefined &&
-      fats === undefined &&
-      carbs === undefined &&
-      calories === undefined
-    ) {
+    if (!hasAnyMacro({ proteins, fats, carbs, calories })) {
       return {
         success: false,
         error: "No pude extraer macros de la respuesta del modelo",
