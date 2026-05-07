@@ -51,6 +51,12 @@ export function useFoodSearch(query: string) {
               grasas_100g: d.grasas_100g,
               carbohidratos_100g: d.carbohidratos_100g,
               fibra_100g: d.fibra_100g,
+              macros_basis: d.macros_basis,
+              unit_name: d.unit_name,
+              kcal_per_unit: d.kcal_per_unit,
+              proteinas_per_unit: d.proteinas_per_unit,
+              grasas_per_unit: d.grasas_per_unit,
+              carbohidratos_per_unit: d.carbohidratos_per_unit,
               source: 'usuario',
             })
           )
@@ -73,6 +79,12 @@ export function useFoodSearch(query: string) {
               carbohidratos_100g: d.carbohidratos_100g,
               fibra_100g: d.fibra_100g,
               categoria: d.categoria,
+              macros_basis: d.macros_basis,
+              unit_name: d.unit_name,
+              kcal_per_unit: d.kcal_per_unit,
+              proteinas_per_unit: d.proteinas_per_unit,
+              grasas_per_unit: d.grasas_per_unit,
+              carbohidratos_per_unit: d.carbohidratos_per_unit,
               source: 'global',
             })
           )

@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Dialog,
   DialogContent,
@@ -27,11 +28,17 @@ import type { FoodItemUsuario } from '@/types'
 
 const foodSchema = z.object({
   nombre: z.string().min(2),
+  macros_basis: z.enum(['per_100g', 'per_unit']).default('per_100g'),
+  unit_name: z.string().optional(),
   kcal_100g: z.coerce.number().min(0),
   proteinas_100g: z.coerce.number().min(0),
   grasas_100g: z.coerce.number().min(0),
   carbohidratos_100g: z.coerce.number().min(0),
   fibra_100g: z.coerce.number().min(0).optional(),
+  kcal_per_unit: z.coerce.number().min(0).optional(),
+  proteinas_per_unit: z.coerce.number().min(0).optional(),
+  grasas_per_unit: z.coerce.number().min(0).optional(),
+  carbohidratos_per_unit: z.coerce.number().min(0).optional(),
 })
 type FoodFormValues = z.infer<typeof foodSchema>
 
@@ -48,11 +55,30 @@ function FoodForm({
   const {
     register,
     handleSubmit,
+    watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FoodFormValues>({
     resolver: zodResolver(foodSchema),
     defaultValues,
   })
+
+  const macrosBasis = watch('macros_basis') || 'per_100g'
+  const macroFields: [keyof FoodFormValues, string][] =
+    macrosBasis === 'per_unit'
+      ? [
+          ['kcal_per_unit', 'Kcal por unidad'],
+          ['proteinas_per_unit', 'Proteínas por unidad'],
+          ['carbohidratos_per_unit', 'Carbohidratos por unidad'],
+          ['grasas_per_unit', 'Grasas por unidad'],
+        ]
+      : [
+          ['kcal_100g', t('kcalPer100')],
+          ['proteinas_100g', t('proteinPer100')],
+          ['carbohidratos_100g', t('carbsPer100')],
+          ['grasas_100g', t('fatPer100')],
+          ['fibra_100g', t('fiberPer100')],
+        ]
 
   return (
     <form onSubmit={handleSubmit(onSave)} className="space-y-3">
@@ -60,14 +86,32 @@ function FoodForm({
         <Label>{t('name')}</Label>
         <Input {...register('nombre')} className={errors.nombre ? 'border-destructive' : ''} />
       </div>
+
+      <div>
+        <Label>Base de macros</Label>
+        <Select
+          defaultValue={defaultValues?.macros_basis || 'per_100g'}
+          onValueChange={(v) => setValue('macros_basis', v as 'per_100g' | 'per_unit')}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="per_100g">Por 100 gramos</SelectItem>
+            <SelectItem value="per_unit">Por unidad</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {macrosBasis === 'per_unit' && (
+        <div>
+          <Label>Nombre de unidad</Label>
+          <Input placeholder="Ej: 1 helado, 1 galleta, 1 porción" {...register('unit_name')} />
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
-        {([
-          ['kcal_100g', t('kcalPer100')],
-          ['proteinas_100g', t('proteinPer100')],
-          ['carbohidratos_100g', t('carbsPer100')],
-          ['grasas_100g', t('fatPer100')],
-          ['fibra_100g', t('fiberPer100')],
-        ] as [keyof FoodFormValues, string][]).map(([field, label]) => (
+        {macroFields.map(([field, label]) => (
           <div key={field}>
             <Label>{label}</Label>
             <Input type="number" step="0.1" {...register(field)} />
@@ -163,7 +207,9 @@ function MyFoodsCatalogue() {
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{food.nombre}</p>
                 <p className="text-xs text-muted-foreground">
-                  {food.kcal_100g} kcal · P:{food.proteinas_100g}g · C:{food.carbohidratos_100g}g · G:{food.grasas_100g}g / 100g
+                  {food.macros_basis === 'per_unit'
+                    ? `${food.kcal_per_unit ?? 0} kcal · P:${food.proteinas_per_unit ?? 0}g · C:${food.carbohidratos_per_unit ?? 0}g · G:${food.grasas_per_unit ?? 0}g / ${food.unit_name || 'unidad'}`
+                    : `${food.kcal_100g} kcal · P:${food.proteinas_100g}g · C:${food.carbohidratos_100g}g · G:${food.grasas_100g}g / 100g`}
                 </p>
               </div>
               <div className="flex gap-1 shrink-0">

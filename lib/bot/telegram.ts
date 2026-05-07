@@ -11,8 +11,8 @@
 import TelegramBot from 'node-telegram-bot-api'
 import { createClient } from '@supabase/supabase-js'
 import { searchOpenFoodFacts } from '@/lib/api/openfoodfacts'
-import { detectFoodFromImageUrl, type DetectedFoodMacros } from '@/lib/api/ocr'
-import type { FoodItem } from '@/types'
+import { detectMacrosFromImage, type MacroDetectionResult } from '@/lib/api/gemini'
+import type { FoodItem, MacrosBasis } from '@/types'
 
 // ─── Singleton bot instance (no polling) ─────────────────────────────────────
 
@@ -45,6 +45,13 @@ type CatalogDraft = {
   carbohidratos_100g: number
   grasas_100g: number
   fibra_100g: number
+  // Per-unit macros
+  macros_basis: MacrosBasis
+  unit_name?: string
+  proteinas_per_unit?: number
+  carbohidratos_per_unit?: number
+  grasas_per_unit?: number
+  kcal_per_unit?: number
 }
 
 type BotSearchFood = {
@@ -81,6 +88,7 @@ type BotSession =
     }
   | { step: 'awaiting_food_qty'; mealType: MealType; mealNumber: number; food: FoodItem }
   | { step: 'awaiting_catalog_photo' }
+  | { step: 'awaiting_catalog_basis'; detected: MacroDetectionResult; draft: CatalogDraft }
   | { step: 'awaiting_catalog_name'; draft: CatalogDraft }
   | { step: 'awaiting_catalog_macro_edit'; draft: CatalogDraft }
   | { step: 'awaiting_catalog_confirm'; draft: CatalogDraft }
@@ -152,18 +160,28 @@ async function sendMealTypeMenu(chatId: number) {
   })
 }
 
-function buildCatalogDraftFromDetected(name: string, macros: DetectedFoodMacros): CatalogDraft {
+function buildCatalogDraftFromDetected(detected: MacroDetectionResult): CatalogDraft {
+  // Por defecto empezamos con per_100g
   return {
-    nombre: name,
-    kcal_100g: macros.kcal_100g,
-    proteinas_100g: macros.proteinas_100g,
-    carbohidratos_100g: macros.carbohidratos_100g,
-    grasas_100g: macros.grasas_100g,
-    fibra_100g: macros.fibra_100g,
+    nombre: detected.foodName || 'Nuevo alimento',
+    kcal_100g: detected.calories || 0,
+    proteinas_100g: detected.proteins || 0,
+    carbohidratos_100g: detected.carbs || 0,
+    grasas_100g: detected.fats || 0,
+    fibra_100g: 0,
+    macros_basis: 'per_100g',
   }
 }
 
 function formatDraft(draft: CatalogDraft): string {
+  if (draft.macros_basis === 'per_unit') {
+    return (
+      `*${draft.nombre}* (${draft.unit_name || '1 unidad'})\n` +
+      `🔥 ${draft.kcal_per_unit || 0} kcal/unidad\n` +
+      `🥩 P: ${draft.proteinas_per_unit || 0}g · 🍞 C: ${draft.carbohidratos_per_unit || 0}g · 🧈 G: ${draft.grasas_per_unit || 0}g`
+    )
+  }
+  
   return (
     `*${draft.nombre}*\n` +
     `🔥 ${draft.kcal_100g} kcal/100g\n` +
@@ -189,6 +207,7 @@ function parseMacroEditInput(text: string): Omit<CatalogDraft, 'nombre'> | null 
     carbohidratos_100g: Math.round(nums[2] * 10) / 10,
     grasas_100g: Math.round(nums[3] * 10) / 10,
     fibra_100g: Math.round((nums[4] ?? 0) * 10) / 10,
+     macros_basis: 'per_100g',
   }
 }
 
@@ -287,10 +306,14 @@ async function handleCatalogPhoto(chatId: number, fileId: string) {
 
   const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`
 
-  await bot.sendMessage(chatId, '🔍 Analizando etiqueta nutricional...')
-  const detected = await detectFoodFromImageUrl(fileUrl)
+  // Descargar la imagen
+  const response = await fetch(fileUrl)
+  const buffer = Buffer.from(await response.arrayBuffer())
 
-  if (!detected) {
+  await bot.sendMessage(chatId, '🤖 Analizando con IA... esto tardará unos segundos.')
+  const detected = await detectMacrosFromImage(buffer)
+
+  if (!detected.success || !detected.proteins) {
     const draft: CatalogDraft = {
       nombre: 'Nuevo alimento',
       kcal_100g: 0,
@@ -298,12 +321,13 @@ async function handleCatalogPhoto(chatId: number, fileId: string) {
       carbohidratos_100g: 0,
       grasas_100g: 0,
       fibra_100g: 0,
+      macros_basis: 'per_100g',
     }
 
     await setSession(chatId, { step: 'awaiting_catalog_name', draft })
     await bot.sendMessage(
       chatId,
-      'No he podido detectar macros de forma fiable.\n\nEscribe el *nombre* que quieres para el alimento y luego te pediré los macros manualmente.',
+      'No he podido detectar macros de forma fiable (error: ' + (detected.error || 'unknown') + ')\n\nEscribe el *nombre* que quieres para el alimento y luego te pediré los macros manualmente.',
       {
         parse_mode: 'Markdown',
         reply_markup: { inline_keyboard: [[{ text: '❌ Cancelar', callback_data: 'menu' }]] },
@@ -312,17 +336,21 @@ async function handleCatalogPhoto(chatId: number, fileId: string) {
     return
   }
 
-  const draft = buildCatalogDraftFromDetected(detected.suggestedName, detected.macros)
-  await setSession(chatId, { step: 'awaiting_catalog_name', draft })
+  // Construir draft inicial con los datos detectados
+  const draft = buildCatalogDraftFromDetected(detected)
+
+  // Preguntar si es per_100g o per_unit
+  await setSession(chatId, { step: 'awaiting_catalog_basis', detected, draft })
 
   await bot.sendMessage(
     chatId,
-    `📸 Detección inicial:\n\n${formatDraft(draft)}\n\nAhora escribe el *nombre* que quieres guardar (puedes usar otro diferente).`,
+    `📸 *Detección IA completada:*\n\n${formatDraft(draft)}\n\n¿Estos macros son:`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '✏️ Corregir macros ahora', callback_data: 'ca_edit_macros' }],
+          [{ text: '📏 Por 100 gramos', callback_data: 'ca_basis:per_100g' }],
+          [{ text: '🔢 Por unidad (1 helado, 1 galleta, etc)', callback_data: 'ca_basis:per_unit' }],
           [{ text: '❌ Cancelar', callback_data: 'menu' }],
         ],
       },
@@ -496,9 +524,13 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
       }
 
       await setSession(chatId, { step: 'awaiting_catalog_macro_edit', draft: session.draft })
+      const basisText =
+        session.draft.macros_basis === 'per_unit'
+          ? 'por unidad'
+          : 'por 100g'
       await bot.sendMessage(
         chatId,
-        'Escribe los macros por 100g en este formato:\n`kcal,proteinas,carbohidratos,grasas,fibra`\n\nEjemplo: `250,12,30,8,4`\n(Fibra es opcional)',
+        `Escribe los macros ${basisText} en este formato:\n\`kcal,proteinas,carbohidratos,grasas,fibra\`\n\nEjemplo: \`250,12,30,8,4\`\n(Fibra es opcional)`,
         {
           parse_mode: 'Markdown',
           reply_markup: { inline_keyboard: [[{ text: '❌ Cancelar', callback_data: 'menu' }]] },
@@ -523,6 +555,12 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
         p_grasas_100g: session.draft.grasas_100g,
         p_carbohidratos_100g: session.draft.carbohidratos_100g,
         p_fibra_100g: session.draft.fibra_100g,
+        p_macros_basis: session.draft.macros_basis || 'per_100g',
+        p_unit_name: session.draft.unit_name || null,
+        p_kcal_per_unit: session.draft.kcal_per_unit || null,
+        p_proteinas_per_unit: session.draft.proteinas_per_unit || null,
+        p_grasas_per_unit: session.draft.grasas_per_unit || null,
+        p_carbohidratos_per_unit: session.draft.carbohidratos_per_unit || null,
       })
 
       await setSession(chatId, { step: 'idle' })
@@ -537,6 +575,62 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
         chatId,
         `✅ Guardado en tu catálogo:\n\n${formatDraft(session.draft)}`,
         { parse_mode: 'Markdown', reply_markup: MAIN_MENU_KEYBOARD }
+      )
+      return
+    }
+
+    // ── Catalog basis selection: ca_basis:per_100g | ca_basis:per_unit ──
+    if (data.startsWith('ca_basis:')) {
+      const basis = data.split(':')[1] as MacrosBasis
+      const session = await getSession(chatId)
+
+      if (session.step !== 'awaiting_catalog_basis' || !session.draft) {
+        await sendMainMenu(chatId)
+        return
+      }
+
+      session.draft.macros_basis = basis
+
+      if (basis === 'per_unit') {
+        // Para per_unit, los macros detectados son por unidad
+        session.draft.proteinas_per_unit = session.draft.proteinas_100g
+        session.draft.grasas_per_unit = session.draft.grasas_100g
+        session.draft.carbohidratos_per_unit = session.draft.carbohidratos_100g
+        session.draft.kcal_per_unit = session.draft.kcal_100g
+        // Limpiar los valores per_100g
+        session.draft.proteinas_100g = 0
+        session.draft.grasas_100g = 0
+        session.draft.carbohidratos_100g = 0
+        session.draft.kcal_100g = 0
+
+        await setSession(chatId, { step: 'awaiting_catalog_basis', detected: session.detected, draft: session.draft })
+        await bot.sendMessage(
+          chatId,
+          `¿Cuál es la unidad? (ej: "1 helado", "1 galleta", "1 porción")\n\nEstos son los macros por unidad:\n${formatDraft(session.draft)}`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [[{ text: '❌ Cancelar', callback_data: 'menu' }]],
+            },
+          }
+        )
+        return
+      }
+
+      // Si es per_100g, continuamos al siguiente paso (nombre)
+      await setSession(chatId, { step: 'awaiting_catalog_name', draft: session.draft })
+      await bot.sendMessage(
+        chatId,
+        `📸 *Datos detectados (por 100g):*\n\n${formatDraft(session.draft)}\n\nAhora escribe el *nombre* que quieres guardar (puedes usar otro diferente).`,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '✏️ Corregir macros', callback_data: 'ca_edit_macros' }],
+              [{ text: '❌ Cancelar', callback_data: 'menu' }],
+            ],
+          },
+        }
       )
       return
     }
@@ -864,6 +958,27 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
     return
   }
 
+  if (session.step === 'awaiting_catalog_basis') {
+    // Usuario está escribiendo el nombre de la unidad para per_unit macros
+    const unitName = text.slice(0, 80).trim()
+    if (unitName.length < 2) {
+      await bot.sendMessage(chatId, 'El nombre de la unidad es muy corto. Intenta de nuevo.')
+      return
+    }
+
+    const draft = { ...session.draft, unit_name: unitName }
+    await setSession(chatId, { step: 'awaiting_catalog_name', draft })
+    await bot.sendMessage(
+      chatId,
+      `✅ Unidad establecida: *${unitName}*\n\nAhora escribe el *nombre* del alimento que quieres guardar.`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '❌ Cancelar', callback_data: 'menu' }]] },
+      }
+    )
+    return
+  }
+
   if (session.step === 'awaiting_catalog_name') {
     const nombre = text.slice(0, 80).trim()
     if (nombre.length < 2) {
@@ -908,7 +1023,23 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
       return
     }
 
-    const draft: CatalogDraft = { ...session.draft, ...parsed }
+    let draft: CatalogDraft
+    if (session.draft.macros_basis === 'per_unit') {
+      draft = {
+        ...session.draft,
+        kcal_per_unit: parsed.kcal_100g,
+        proteinas_per_unit: parsed.proteinas_100g,
+        carbohidratos_per_unit: parsed.carbohidratos_100g,
+        grasas_per_unit: parsed.grasas_100g,
+        kcal_100g: 0,
+        proteinas_100g: 0,
+        carbohidratos_100g: 0,
+        grasas_100g: 0,
+        fibra_100g: 0,
+      }
+    } else {
+      draft = { ...session.draft, ...parsed }
+    }
     await setSession(chatId, { step: 'awaiting_catalog_confirm', draft })
     await promptCatalogConfirm(chatId, draft)
     return

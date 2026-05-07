@@ -44,6 +44,28 @@ export function calcMacrosFromGrams(
   }
 }
 
+export function calcMacros(
+  food: FoodItem,
+  cantidad_gr: number,
+  cantidad_unit?: number
+): MacrosSummary {
+  if (
+    food.macros_basis === 'per_unit' &&
+    typeof cantidad_unit === 'number' &&
+    cantidad_unit > 0
+  ) {
+    return {
+      kcal: Math.round((food.kcal_per_unit ?? 0) * cantidad_unit * 10) / 10,
+      proteinas: Math.round((food.proteinas_per_unit ?? 0) * cantidad_unit * 10) / 10,
+      grasas: Math.round((food.grasas_per_unit ?? 0) * cantidad_unit * 10) / 10,
+      carbohidratos: Math.round((food.carbohidratos_per_unit ?? 0) * cantidad_unit * 10) / 10,
+      fibra: 0,
+    }
+  }
+
+  return calcMacrosFromGrams(food, cantidad_gr)
+}
+
 export function calcMacroPercentages(macros: MacrosSummary) {
   const total =
     macros.proteinas * 4 + macros.carbohidratos * 4 + macros.grasas * 9

@@ -6,16 +6,17 @@ interface Props {
   macros: MacrosSummary
   foodName: string
   quantityGr: number
+  quantityLabel?: string
 }
 
-export function FoodEntryBreakdown({ macros, foodName, quantityGr }: Props) {
+export function FoodEntryBreakdown({ macros, foodName, quantityGr, quantityLabel = `${quantityGr}g` }: Props) {
   const t = useTranslations('log')
   const tc = useTranslations('common')
 
   return (
     <div className="rounded-xl border bg-muted/40 p-4 space-y-3">
       <p className="text-sm font-semibold">
-        {t('breakdown')}: <span className="font-normal text-muted-foreground">{foodName} ({quantityGr}g)</span>
+        {t('breakdown')}: <span className="font-normal text-muted-foreground">{foodName} ({quantityLabel})</span>
       </p>
       <div className="grid grid-cols-4 gap-2">
         <div className="text-center">

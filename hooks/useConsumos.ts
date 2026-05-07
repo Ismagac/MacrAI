@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Consumo, ConsumoFormData } from '@/types'
-import { calcMacrosFromGrams } from '@/lib/utils/macros'
+import { calcMacros } from '@/lib/utils/macros'
 import { format } from 'date-fns'
 
 export function useConsumos(fecha: string) {
@@ -38,7 +38,11 @@ export function useConsumos(fecha: string) {
       } = await supabase.auth.getUser()
       if (!user) return null
 
-      const macros = calcMacrosFromGrams(formData.alimento, formData.cantidad_gr)
+      const macros = calcMacros(
+        formData.alimento,
+        formData.cantidad_gr,
+        formData.cantidad_unit
+      )
 
       const payload = {
         user_id: user.id,
@@ -50,6 +54,8 @@ export function useConsumos(fecha: string) {
         alimento_source: formData.alimento.source,
         nombre_alimento: formData.alimento.nombre,
         cantidad_gr: formData.cantidad_gr,
+        macros_basis: formData.macros_basis || formData.alimento.macros_basis || 'per_100g',
+        cantidad_unit: formData.cantidad_unit ?? null,
         kcal: macros.kcal,
         proteinas: macros.proteinas,
         grasas: macros.grasas,
@@ -93,6 +99,7 @@ export function useConsumos(fecha: string) {
     const factor = nuevaCantidadGr / prev.cantidad_gr
     const payload = {
       cantidad_gr: nuevaCantidadGr,
+      cantidad_unit: prev.macros_basis === 'per_unit' ? Math.round(nuevaCantidadGr * 100) / 100 : prev.cantidad_unit,
       kcal: Math.round(prev.kcal * factor * 100) / 100,
       proteinas: Math.round(prev.proteinas * factor * 100) / 100,
       grasas: Math.round(prev.grasas * factor * 100) / 100,

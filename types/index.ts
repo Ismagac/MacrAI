@@ -18,6 +18,7 @@ export type ActivityLevel =
   | 'muy_activo'
 export type Periodo = 'diario' | 'semanal' | 'mensual'
 export type Sexo = 'hombre' | 'mujer' | 'otro'
+export type MacrosBasis = 'per_100g' | 'per_unit'
 
 // ─── Food ─────────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,13 @@ export interface FoodItem {
   fibra_100g?: number
   categoria?: string
   source: FoodSource
+  // Per-unit macros support
+  macros_basis?: MacrosBasis
+  unit_name?: string
+  proteinas_per_unit?: number
+  grasas_per_unit?: number
+  carbohidratos_per_unit?: number
+  kcal_per_unit?: number
 }
 
 export interface FoodItemUsuario extends FoodItem {
@@ -58,6 +66,9 @@ export interface Consumo {
   tipo_comida: MealType
   numero_comida: number
   created_at: string
+  // Per-unit macros support
+  macros_basis?: MacrosBasis
+  cantidad_unit?: number // For per_unit basis (e.g., 2 = 2 ice creams)
 }
 
 export interface ConsumoFormData {
@@ -66,6 +77,8 @@ export interface ConsumoFormData {
   tipo_comida: MealType
   numero_comida: number
   fecha: string
+  macros_basis?: MacrosBasis
+  cantidad_unit?: number
 }
 
 // ─── Macros summary ───────────────────────────────────────────────────────────

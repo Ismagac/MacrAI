@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select'
 import { FoodSearchCombobox } from './FoodSearchCombobox'
 import { FoodEntryBreakdown } from './FoodEntryBreakdown'
-import { calcMacrosFromGrams } from '@/lib/utils/macros'
+import { calcMacros } from '@/lib/utils/macros'
 import type { FoodItem, ConsumoFormData, MealType } from '@/types'
 import { useTranslations } from 'next-intl'
 import { format } from 'date-fns'
@@ -66,8 +66,10 @@ export function AddFoodModal({ open, onOpenChange, onSave, fecha }: Props) {
   })
 
   const cantidad = watch('cantidad_gr')
+  const isPerUnit = selectedFood?.macros_basis === 'per_unit'
+  const unitName = selectedFood?.unit_name || 'unidad'
   const macros = selectedFood && cantidad > 0
-    ? calcMacrosFromGrams(selectedFood, cantidad)
+    ? calcMacros(selectedFood, cantidad, isPerUnit ? cantidad : undefined)
     : null
 
   function handleSelectFood(food: FoodItem) {
@@ -88,6 +90,8 @@ export function AddFoodModal({ open, onOpenChange, onSave, fecha }: Props) {
       tipo_comida: values.tipo_comida,
       numero_comida: values.numero_comida,
       fecha,
+      macros_basis: selectedFood.macros_basis,
+      cantidad_unit: isPerUnit ? values.cantidad_gr : undefined,
     })
     setSaving(false)
     setSelectedFood(null)
@@ -127,7 +131,9 @@ export function AddFoodModal({ open, onOpenChange, onSave, fecha }: Props) {
                   </button>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {selectedFood.kcal_100g} kcal · {selectedFood.proteinas_100g}g P · {selectedFood.carbohidratos_100g}g C · {selectedFood.grasas_100g}g G / 100g
+                  {isPerUnit
+                    ? `${selectedFood.kcal_per_unit ?? 0} kcal · ${selectedFood.proteinas_per_unit ?? 0}g P · ${selectedFood.carbohidratos_per_unit ?? 0}g C · ${selectedFood.grasas_per_unit ?? 0}g G / ${unitName}`
+                    : `${selectedFood.kcal_100g} kcal · ${selectedFood.proteinas_100g}g P · ${selectedFood.carbohidratos_100g}g C · ${selectedFood.grasas_100g}g G / 100g`}
                 </p>
               </div>
 
@@ -141,6 +147,9 @@ export function AddFoodModal({ open, onOpenChange, onSave, fecha }: Props) {
                   {...register('cantidad_gr')}
                   className={errors.cantidad_gr ? 'border-destructive' : ''}
                 />
+                <p className="text-xs text-muted-foreground">
+                  {isPerUnit ? `Cantidad en ${unitName}s` : 'Cantidad en gramos'}
+                </p>
               </div>
 
               {/* Breakdown preview */}
@@ -149,6 +158,7 @@ export function AddFoodModal({ open, onOpenChange, onSave, fecha }: Props) {
                   macros={macros}
                   foodName={selectedFood.nombre}
                   quantityGr={cantidad}
+                  quantityLabel={isPerUnit ? `${cantidad} ${unitName}` : `${cantidad}g`}
                 />
               )}
 

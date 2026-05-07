@@ -79,7 +79,13 @@ export function DailyLogTable({ consumos, groupingMode, onDelete, onUpdateCantid
             {/* Group items */}
             {!isCollapsed && (
               <div className="divide-y">
-                {group.items.map((consumo) => (
+                {group.items.map((consumo) => {
+                  const qtyLabel =
+                    consumo.macros_basis === 'per_unit'
+                      ? `${consumo.cantidad_unit ?? consumo.cantidad_gr}u`
+                      : `${consumo.cantidad_gr}g`
+
+                  return (
                   <div
                     key={consumo.id}
                     className="flex items-center gap-3 px-4 py-2.5 hover:bg-accent/30 transition-colors"
@@ -96,7 +102,7 @@ export function DailyLogTable({ consumos, groupingMode, onDelete, onUpdateCantid
                             step="0.5"
                             min={0.1}
                           />
-                          <span className="text-xs text-muted-foreground">g</span>
+                          <span className="text-xs text-muted-foreground">{consumo.macros_basis === 'per_unit' ? 'u' : 'g'}</span>
                           <Button
                             variant="ghost"
                             size="icon"
@@ -119,7 +125,7 @@ export function DailyLogTable({ consumos, groupingMode, onDelete, onUpdateCantid
                         </div>
                       ) : (
                         <p className="text-xs text-muted-foreground">
-                          {consumo.cantidad_gr}g · {Math.round(consumo.kcal)} kcal · P:{Math.round(consumo.proteinas)}g · C:{Math.round(consumo.carbohidratos)}g · G:{Math.round(consumo.grasas)}g
+                          {qtyLabel} · {Math.round(consumo.kcal)} kcal · P:{Math.round(consumo.proteinas)}g · C:{Math.round(consumo.carbohidratos)}g · G:{Math.round(consumo.grasas)}g
                         </p>
                       )}
                     </div>
@@ -143,7 +149,8 @@ export function DailyLogTable({ consumos, groupingMode, onDelete, onUpdateCantid
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
