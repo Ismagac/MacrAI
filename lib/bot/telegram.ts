@@ -680,7 +680,11 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
       }
 
       const db = getDb()
-      const { data: id, error } = await db.rpc('bot_add_user_food', {
+      let id: string | null = null
+      let error: { message?: string; code?: string } | null = null
+
+      // Try current RPC signature first (supports per-unit macros)
+      const firstTry = await db.rpc('bot_add_user_food', {
         p_chat_id: chatId,
         p_nombre: session.draft.nombre,
         p_kcal_100g: session.draft.kcal_100g,
@@ -696,9 +700,42 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
         p_carbohidratos_per_unit: session.draft.carbohidratos_per_unit || null,
       })
 
+      id = (firstTry.data as string | null) ?? null
+      error = (firstTry.error as { message?: string; code?: string } | null) ?? null
+
+      // Fallback for environments with old migration/signature not applied yet.
+      if (!id && error) {
+        const msg = (error.message || '').toLowerCase()
+        const looksLikeSignatureMismatch =
+          msg.includes('function') ||
+          msg.includes('does not exist') ||
+          msg.includes('argument') ||
+          msg.includes('parameter')
+
+        if (looksLikeSignatureMismatch) {
+          const fallbackTry = await db.rpc('bot_add_user_food', {
+            p_chat_id: chatId,
+            p_nombre: session.draft.nombre,
+            p_kcal_100g: session.draft.kcal_100g,
+            p_proteinas_100g: session.draft.proteinas_100g,
+            p_grasas_100g: session.draft.grasas_100g,
+            p_carbohidratos_100g: session.draft.carbohidratos_100g,
+            p_fibra_100g: session.draft.fibra_100g,
+          })
+
+          id = (fallbackTry.data as string | null) ?? null
+          error = (fallbackTry.error as { message?: string; code?: string } | null) ?? null
+        }
+      }
+
       await setSession(chatId, { step: 'idle' })
 
       if (error || !id) {
+        console.error('[telegram][ca_save] bot_add_user_food failed', {
+          chatId,
+          error,
+          draft: session.draft,
+        })
         await bot.sendMessage(chatId, '❌ No he podido guardar el alimento en tu catálogo.')
         await sendMainMenu(chatId)
         return
