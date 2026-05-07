@@ -691,7 +691,7 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
         p_proteinas_100g: session.draft.proteinas_100g,
         p_grasas_100g: session.draft.grasas_100g,
         p_carbohidratos_100g: session.draft.carbohidratos_100g,
-        p_fibra_100g: session.draft.fibra_100g,
+        p_fibra_100g: session.draft.fibra_100g ?? 0,
         p_macros_basis: session.draft.macros_basis || 'per_100g',
         p_unit_name: session.draft.unit_name || null,
         p_kcal_per_unit: session.draft.kcal_per_unit || null,
@@ -720,7 +720,7 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
             p_proteinas_100g: session.draft.proteinas_100g,
             p_grasas_100g: session.draft.grasas_100g,
             p_carbohidratos_100g: session.draft.carbohidratos_100g,
-            p_fibra_100g: session.draft.fibra_100g,
+            p_fibra_100g: session.draft.fibra_100g ?? 0,
           })
 
           id = (fallbackTry.data as string | null) ?? null
@@ -1337,7 +1337,7 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
         proteinas_100g: 0,
         carbohidratos_100g: 0,
         grasas_100g: 0,
-        fibra_100g: 0,
+        fibra_100g: session.draft.fibra_100g ?? 0,
       }
     } else {
       draft = { ...session.draft, ...parsed }
