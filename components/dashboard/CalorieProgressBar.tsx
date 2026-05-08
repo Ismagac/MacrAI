@@ -17,13 +17,15 @@ export function CalorieProgressBar({ macros, objetivo }: Props) {
   const diff = Math.abs(Math.round(goal - macros.kcal))
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="flex items-center justify-between text-sm">
-        <div className="flex items-center gap-1.5 font-medium">
-          <Flame className="h-4 w-4 text-orange-500" />
+        <div className="flex items-center gap-2 font-semibold">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-orange-500/15 text-orange-500">
+            <Flame className="h-4 w-4" />
+          </span>
           {t('calories')}
         </div>
-        <span className="text-muted-foreground">
+        <span className="text-muted-foreground font-medium">
           <span className={cn('font-semibold', exceeded && 'text-destructive')}>
             {Math.round(macros.kcal)}
           </span>{' '}
@@ -32,9 +34,9 @@ export function CalorieProgressBar({ macros, objetivo }: Props) {
       </div>
       <Progress
         value={pct}
-        className={cn('h-3', exceeded && '[&>div]:bg-destructive')}
+        className={cn('h-3.5 rounded-full bg-muted/70', exceeded && '[&>div]:bg-destructive')}
       />
-      <p className="text-xs text-muted-foreground text-right">
+      <p className="text-xs text-muted-foreground text-right font-medium">
         {exceeded
           ? `+${diff} kcal ${t('exceeded')}`
           : `${diff} kcal ${t('remaining')}`}

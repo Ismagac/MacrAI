@@ -59,21 +59,24 @@ export function DashboardClient({ initialConsumos, objetivo, today, locale }: Pr
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">{t('title')}</h1>
-          <p className="text-sm text-muted-foreground capitalize">
-            {format(new Date(today + 'T12:00:00'), "EEEE, d 'de' MMMM", { locale: es })}
-          </p>
+      <div className="surface-card surface-glow p-4 md:p-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.14em] text-primary/80 font-semibold">MacrAI Daily Pulse</p>
+            <h1 className="text-2xl md:text-3xl font-extrabold mt-1">{t('title')}</h1>
+            <p className="text-sm text-muted-foreground capitalize mt-1">
+              {format(new Date(today + 'T12:00:00'), "EEEE, d 'de' MMMM", { locale: es })}
+            </p>
+          </div>
+          <Button onClick={() => setModalOpen(true)} size="sm" className="shrink-0">
+            <Plus className="h-4 w-4 mr-1" />
+            {t('addFood')}
+          </Button>
         </div>
-        <Button onClick={() => setModalOpen(true)} size="sm">
-          <Plus className="h-4 w-4 mr-1" />
-          {t('addFood')}
-        </Button>
       </div>
 
       {/* Calorie progress */}
-      <Card>
+      <Card className="surface-glow">
         <CardContent className="pt-6">
           <CalorieProgressBar macros={macros} objetivo={objetivo} />
         </CardContent>
@@ -104,9 +107,9 @@ export function DashboardClient({ initialConsumos, objetivo, today, locale }: Pr
             {recentConsumos.length === 0 ? (
               <p className="text-sm text-muted-foreground py-8 text-center">{t('noData')}</p>
             ) : (
-              <ul className="space-y-2">
+              <ul className="space-y-2.5">
                 {recentConsumos.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
+                  <li key={c.id} className="flex items-center justify-between gap-2 text-sm rounded-xl border border-border/70 bg-background/70 px-3 py-2">
                     <div className="min-w-0">
                       <p className="font-medium truncate">{c.nombre_alimento}</p>
                       <p className="text-xs text-muted-foreground">

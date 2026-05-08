@@ -29,15 +29,17 @@ export function Sidebar() {
   const pathname = usePathname()
 
   return (
-    <aside className="hidden md:flex flex-col w-60 shrink-0 border-r bg-background h-screen sticky top-0">
+    <aside className="hidden md:flex flex-col w-64 shrink-0 border-r border-primary/15 bg-background/60 backdrop-blur-xl h-screen sticky top-0">
       {/* Logo */}
-      <div className="flex items-center gap-2 px-6 py-5 border-b">
-        <Zap className="h-6 w-6 text-primary" />
-        <span className="text-xl font-bold tracking-tight">MacrAI</span>
+      <div className="px-5 py-5 border-b border-primary/10">
+        <div className="surface-card surface-glow flex items-center gap-2 px-4 py-3">
+          <Zap className="h-5 w-5 text-primary" />
+          <span className="text-lg font-extrabold tracking-tight text-primary">MacrAI</span>
+        </div>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+      <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
         {navItems.map(({ key, href, icon: Icon }) => {
           const fullHref = `/${locale}${href}`
           const isActive = pathname === fullHref || pathname.startsWith(fullHref + '/')
@@ -46,13 +48,20 @@ export function Sidebar() {
               key={key}
               href={fullHref}
               className={cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all duration-200',
                 isActive
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                  ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-16px_hsl(var(--primary)/0.95)]'
+                  : 'text-muted-foreground hover:bg-card/80 hover:text-foreground'
               )}
             >
-              <Icon className="h-4 w-4 shrink-0" />
+              <span
+                className={cn(
+                  'inline-flex h-7 w-7 items-center justify-center rounded-lg transition-colors',
+                  isActive ? 'bg-primary-foreground/20' : 'bg-muted/60 group-hover:bg-primary/10'
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+              </span>
               {t(key)}
             </Link>
           )

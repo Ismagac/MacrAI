@@ -86,12 +86,37 @@
   * {
     @apply border-border;
   }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-head), ui-sans-serif, sans-serif;
+    letter-spacing: -0.02em;
+  }
+
   body {
+    font-family: var(--font-body), ui-sans-serif, sans-serif;
     @apply bg-background text-foreground;
     background-image:
       radial-gradient(900px circle at -5% -20%, var(--bg-orb-1), transparent 55%),
       radial-gradient(700px circle at 110% -10%, var(--bg-orb-2), transparent 52%),
       radial-gradient(700px circle at 50% 120%, var(--bg-orb-3), transparent 48%);
     background-attachment: fixed;
+  }
+}
+
+@layer components {
+  .surface-card {
+    @apply rounded-2xl border border-border/70 bg-card/80 backdrop-blur-sm shadow-[0_16px_40px_-24px_hsl(var(--foreground)/0.25)];
+  }
+
+  .surface-glow {
+    box-shadow:
+      0 18px 38px -24px hsl(var(--foreground) / 0.38),
+      0 0 0 1px hsl(var(--primary) / 0.14),
+      0 0 0 6px hsl(var(--primary) / 0.06);
   }
 }
