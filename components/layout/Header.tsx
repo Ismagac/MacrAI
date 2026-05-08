@@ -27,9 +27,9 @@ export function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-background/95 backdrop-blur px-4 md:px-6">
+    <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b border-primary/15 bg-background/75 backdrop-blur-xl px-4 md:px-6 shadow-sm">
       {/* Mobile logo */}
-      <span className="md:hidden text-lg font-bold tracking-tight">MacrAI</span>
+      <span className="md:hidden text-lg font-extrabold tracking-tight text-primary">MacrAI</span>
 
       <div className="flex-1" />
 
