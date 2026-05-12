@@ -11,7 +11,7 @@
 import TelegramBot from 'node-telegram-bot-api'
 import { createClient } from '@supabase/supabase-js'
 import { searchOpenFoodFacts } from '@/lib/api/openfoodfacts'
-import { detectMacrosFromImage, type MacroDetectionResult } from '@/lib/api/gemini'
+import { detectMacrosFromImage, parseUserIntent, type MacroDetectionResult } from '@/lib/api/gemini'
 import type { FoodItem, MacrosBasis } from '@/types'
 
 // ─── Singleton bot instance (no polling) ─────────────────────────────────────
@@ -1428,13 +1428,76 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
     return
   }
 
-  // ── Default: treat free text as food search from main menu ──
-  await setSession(chatId, { step: 'awaiting_food_query', mealType: 'otro', mealNumber: 1 })
-  // Re-process as food search
-  const parsed = parseQtyAndQuery(text)
-  await bot.sendMessage(chatId, `🔍 Buscando *${parsed.query}*...`, { parse_mode: 'Markdown' })
+  // ── Default: use AI to understand the user's intent ──
+  const intent = await parseUserIntent(text)
 
-  const foods = await searchFoodsMerged(chatId, parsed.query)
+  if (intent.type === 'check_macros') {
+    await handleMacrosToday(chatId)
+    return
+  }
+
+  if (intent.type === 'history') {
+    await handleHistory(chatId)
+    return
+  }
+
+  if (intent.type === 'catalog') {
+    await handleCatalog(chatId)
+    return
+  }
+
+  if (intent.type === 'edit_log') {
+    const db = getDb()
+    const { data: rows } = await db.rpc('bot_list_today_consumos', { p_chat_id: chatId })
+    const entries = ((rows ?? []) as TodayEntry[]).map((r) => ({
+      ...r,
+      cantidad_gr: Number(r.cantidad_gr),
+      kcal: Number(r.kcal),
+      proteinas: Number(r.proteinas),
+      carbohidratos: Number(r.carbohidratos),
+      grasas: Number(r.grasas),
+    }))
+
+    if (entries.length === 0) {
+      await bot.sendMessage(chatId, 'No tienes registros hoy para corregir.', {
+        reply_markup: MAIN_MENU_KEYBOARD,
+      })
+      return
+    }
+
+    await setSession(chatId, { step: 'selecting_today_entry', entries })
+    const rowsKb: TelegramBot.InlineKeyboardButton[][] = entries.slice(0, 10).map((e, i) => [
+      {
+        text: `${e.nombre_alimento.slice(0, 28)} · ${e.cantidad_gr}g · ${Math.round(e.kcal)} kcal`,
+        callback_data: `edsel:${i}`,
+      },
+    ])
+    rowsKb.push([{ text: '« Menú principal', callback_data: 'menu' }])
+    await bot.sendMessage(chatId, '✏️ ¿Qué entrada quieres corregir?', {
+      reply_markup: { inline_keyboard: rowsKb },
+    })
+    return
+  }
+
+  if (intent.type === 'chat') {
+    await bot.sendMessage(chatId, intent.reply, {
+      parse_mode: 'Markdown',
+      reply_markup: MAIN_MENU_KEYBOARD,
+    })
+    return
+  }
+
+  // log_food (default)
+  const mealType: MealType =
+    intent.type === 'log_food' && intent.mealType
+      ? (intent.mealType as MealType)
+      : 'otro'
+  const foodQuery = intent.type === 'log_food' ? intent.query : text
+  const rawQty = intent.type === 'log_food' ? intent.qty : parseQtyAndQuery(text).qty
+
+  await bot.sendMessage(chatId, `🔍 Buscando *${foodQuery}*...`, { parse_mode: 'Markdown' })
+
+  const foods = await searchFoodsMerged(chatId, foodQuery)
   if (foods.length === 0) {
     await bot.sendMessage(chatId, 'Sin resultados. ¿Qué quieres hacer?', {
       reply_markup: {
@@ -1449,13 +1512,13 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
 
   await setSession(chatId, {
     step: 'selecting_food',
-    mealType: 'otro',
+    mealType,
     mealNumber: 1,
     foods,
-    proposedQty: parsed.qty ?? undefined,
+    proposedQty: rawQty ?? undefined,
   })
 
-  await sendFoodResults(chatId, foods, 'otro', 1, parsed.qty ?? undefined)
+  await sendFoodResults(chatId, foods, mealType, 1, rawQty ?? undefined)
 }
 
 // ─── Macros today handler ────────────────────────────────────────────────────

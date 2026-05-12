@@ -480,3 +480,150 @@ export async function isNutritionLabel(imageData: string | Buffer): Promise<{
     return { isLabel: false, confidence: 0 };
   }
 }
+
+// ─── Text-only generation helper ──────────────────────────────────────────────
+
+async function generateTextWithFallback(
+  prompt: string,
+  config?: { temperature?: number; maxOutputTokens?: number }
+): Promise<string> {
+  let lastError: unknown = null;
+  const candidates = await getModelCandidates();
+
+  for (const modelName of candidates) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        generationConfig: {
+          temperature: config?.temperature ?? 0.1,
+          topP: 0.8,
+          maxOutputTokens: config?.maxOutputTokens ?? 300,
+        },
+      });
+
+      const response = await withTimeout(
+        model.generateContent([prompt]),
+        GEMINI_MODEL_TIMEOUT_MS,
+        `Gemini text ${modelName}`
+      );
+      return response.response.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    } catch (error) {
+      lastError = error;
+      if (!shouldTryNextModel(error)) throw error;
+    }
+  }
+
+  throw lastError ?? new Error("No Gemini model available");
+}
+
+// ─── User Intent Parser ───────────────────────────────────────────────────────
+
+export type UserIntent =
+  | { type: "log_food"; query: string; qty?: number; mealType?: string }
+  | { type: "check_macros" }
+  | { type: "history" }
+  | { type: "catalog" }
+  | { type: "edit_log" }
+  | { type: "chat"; reply: string };
+
+const INTENT_SYSTEM_PROMPT = `Eres MacrAI. Clasifica el mensaje del usuario. Devuelve SOLO JSON válido.
+Tipos válidos:
+- "log_food": registrar un alimento. Campos: query (string), qty (número en gramos, opcional), mealType (desayuno|almuerzo|comida|merienda|cena|snack|otro, opcional)
+- "check_macros": ver macros/calorías de hoy
+- "history": ver historial semanal
+- "catalog": ver catálogo personal de alimentos
+- "edit_log": corregir, editar o borrar un registro del diario
+- "chat": conversación general. Campo: reply (respuesta corta y amigable en español, máximo 2 frases)
+
+Ejemplos:
+"añade 150 tortitas de maiz" → {"type":"log_food","query":"tortitas de maiz","qty":150}
+"ponme 200g de pollo en la comida" → {"type":"log_food","query":"pollo","qty":200,"mealType":"comida"}
+"registra desayuno: 2 huevos" → {"type":"log_food","query":"huevos","qty":2,"mealType":"desayuno"}
+"¿cuánto llevo hoy?" → {"type":"check_macros"}
+"mis macros" → {"type":"check_macros"}
+"historial semanal" → {"type":"history"}
+"mi catálogo" → {"type":"catalog"}
+"borra el yogur de esta mañana" → {"type":"edit_log"}
+"hola" → {"type":"chat","reply":"¡Hola! ¿Qué quieres registrar hoy? 💪"}
+"gracias" → {"type":"chat","reply":"¡De nada! Aquí estoy para lo que necesites. 😊"}
+
+Mensaje del usuario: `;
+
+export async function parseUserIntent(text: string): Promise<UserIntent> {
+  if (!process.env.GOOGLE_API_KEY) {
+    return { type: "log_food", query: text };
+  }
+
+  try {
+    const raw = await withTimeout(
+      generateTextWithFallback(INTENT_SYSTEM_PROMPT + JSON.stringify(text), {
+        temperature: 0.1,
+        maxOutputTokens: 150,
+      }),
+      6000,
+      "Gemini intent parse"
+    );
+
+    const jsonStr = extractJsonObject(raw);
+    if (jsonStr) {
+      const obj = JSON.parse(jsonStr) as Record<string, unknown>;
+      const type = obj.type as string;
+
+      if (type === "check_macros") return { type: "check_macros" };
+      if (type === "history") return { type: "history" };
+      if (type === "catalog") return { type: "catalog" };
+      if (type === "edit_log") return { type: "edit_log" };
+      if (type === "chat" && typeof obj.reply === "string") {
+        return { type: "chat", reply: obj.reply };
+      }
+      if (type === "log_food") {
+        return {
+          type: "log_food",
+          query: typeof obj.query === "string" ? obj.query : text,
+          qty: coerceNumber(obj.qty),
+          mealType: typeof obj.mealType === "string" ? obj.mealType : undefined,
+        };
+      }
+    }
+  } catch {
+    // fall through to default food search
+  }
+
+  return { type: "log_food", query: text };
+}
+
+// ─── Agent Conversational Reply ───────────────────────────────────────────────
+
+export type AgentMessage = { role: "user" | "assistant"; content: string };
+
+export async function generateAgentReply(
+  userMessage: string,
+  context: string,
+  history: AgentMessage[] = []
+): Promise<string> {
+  const systemPrompt =
+    `Eres MacrAI, el asistente personal de nutrición integrado en la app.\n` +
+    `Eres conciso, motivador y directo. Responde siempre en español. Máximo 3 frases.\n` +
+    `No expliques lo que vas a hacer, hazlo. Usa los datos del contexto cuando sean relevantes.\n` +
+    (context ? `\n[Datos del usuario]\n${context}\n` : "");
+
+  const historyText = history
+    .slice(-6)
+    .map((m) => `${m.role === "user" ? "Usuario" : "MacrAI"}: ${m.content}`)
+    .join("\n");
+
+  const fullPrompt =
+    systemPrompt +
+    (historyText ? `\n[Conversación previa]\n${historyText}\n` : "") +
+    `\nUsuario: ${userMessage}\nMacrAI:`;
+
+  try {
+    return await withTimeout(
+      generateTextWithFallback(fullPrompt, { temperature: 0.7, maxOutputTokens: 350 }),
+      10000,
+      "Gemini agent reply"
+    );
+  } catch {
+    return "Lo siento, no pude procesar tu mensaje ahora mismo. ¿Puedo ayudarte con algo más?";
+  }
+}

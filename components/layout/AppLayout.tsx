@@ -1,6 +1,7 @@
 import { Sidebar } from './Sidebar'
 import { Header } from './Header'
 import { MobileNav } from './MobileNav'
+import { MacrAIChat } from '@/components/chat/MacrAIChat'
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -13,6 +14,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </main>
         <MobileNav />
       </div>
+      <MacrAIChat />
     </div>
   )
 }
