@@ -703,29 +703,21 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
       id = (firstTry.data as string | null) ?? null
       error = (firstTry.error as { message?: string; code?: string } | null) ?? null
 
-      // Fallback for environments with old migration/signature not applied yet.
+      // Always try legacy signature as fallback when first call fails.
+      // This protects us from partially applied DB migrations or schema drift.
       if (!id && error) {
-        const msg = (error.message || '').toLowerCase()
-        const looksLikeSignatureMismatch =
-          msg.includes('function') ||
-          msg.includes('does not exist') ||
-          msg.includes('argument') ||
-          msg.includes('parameter')
+        const fallbackTry = await db.rpc('bot_add_user_food', {
+          p_chat_id: chatId,
+          p_nombre: session.draft.nombre,
+          p_kcal_100g: session.draft.kcal_100g,
+          p_proteinas_100g: session.draft.proteinas_100g,
+          p_grasas_100g: session.draft.grasas_100g,
+          p_carbohidratos_100g: session.draft.carbohidratos_100g,
+          p_fibra_100g: session.draft.fibra_100g ?? 0,
+        })
 
-        if (looksLikeSignatureMismatch) {
-          const fallbackTry = await db.rpc('bot_add_user_food', {
-            p_chat_id: chatId,
-            p_nombre: session.draft.nombre,
-            p_kcal_100g: session.draft.kcal_100g,
-            p_proteinas_100g: session.draft.proteinas_100g,
-            p_grasas_100g: session.draft.grasas_100g,
-            p_carbohidratos_100g: session.draft.carbohidratos_100g,
-            p_fibra_100g: session.draft.fibra_100g ?? 0,
-          })
-
-          id = (fallbackTry.data as string | null) ?? null
-          error = (fallbackTry.error as { message?: string; code?: string } | null) ?? null
-        }
+        id = (fallbackTry.data as string | null) ?? null
+        error = (fallbackTry.error as { message?: string; code?: string } | null) ?? null
       }
 
       await setSession(chatId, { step: 'idle' })
@@ -1280,6 +1272,23 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
     const nombre = text.slice(0, 80).trim()
     if (nombre.length < 2) {
       await bot.sendMessage(chatId, 'El nombre es demasiado corto. Escribe uno válido.')
+      return
+    }
+
+    // Guardrail: users often clarify macro basis here ("es por 100 gramos")
+    // and we should not save that sentence as the food name.
+    const looksLikeBasisClarification =
+      /\bpor\s*100\b/i.test(nombre) ||
+      /\b100\s*(g|gr|gramos?)\b/i.test(nombre) ||
+      /\bpor\s*unidad\b/i.test(nombre)
+
+    if (looksLikeBasisClarification) {
+      const basisLabel = session.draft.macros_basis === 'per_unit' ? 'por unidad' : 'por 100g'
+      await bot.sendMessage(
+        chatId,
+        `Perfecto, lo tengo en *${basisLabel}*.\n\nAhora escribe solo el *nombre del alimento* (ej: \`Café frío light hacendado\`).`,
+        { parse_mode: 'Markdown' }
+      )
       return
     }
 
