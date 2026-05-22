@@ -524,6 +524,17 @@ async function generateTextWithFallback(
 
 export type UserIntent =
   | { type: "log_food"; query: string; qty?: number; mealType?: string }
+  | {
+      type: "add_catalog_food";
+      nombre: string;
+      macros_basis: "per_100g" | "per_unit";
+      unit_name?: string;
+      kcal: number;
+      proteinas: number;
+      carbohidratos: number;
+      grasas: number;
+      fibra?: number;
+    }
   | { type: "check_macros" }
   | { type: "history" }
   | { type: "catalog" }
@@ -533,6 +544,7 @@ export type UserIntent =
 const INTENT_SYSTEM_PROMPT = `Eres MacrAI. Clasifica el mensaje del usuario. Devuelve SOLO JSON válido.
 Tipos válidos:
 - "log_food": registrar un alimento. Campos: query (string), qty (número en gramos, opcional), mealType (desayuno|almuerzo|comida|merienda|cena|snack|otro, opcional)
+- "add_catalog_food": añadir alimento al catálogo con macros completos. Campos: nombre, macros_basis("per_100g"|"per_unit"), unit_name(opcional), kcal, proteinas, carbohidratos, grasas, fibra(opcional)
 - "check_macros": ver macros/calorías de hoy
 - "history": ver historial semanal
 - "catalog": ver catálogo personal de alimentos
@@ -543,6 +555,8 @@ Ejemplos:
 "añade 150 tortitas de maiz" → {"type":"log_food","query":"tortitas de maiz","qty":150}
 "ponme 200g de pollo en la comida" → {"type":"log_food","query":"pollo","qty":200,"mealType":"comida"}
 "registra desayuno: 2 huevos" → {"type":"log_food","query":"huevos","qty":2,"mealType":"desayuno"}
+"añade un café frío light hacendado, por cada 250ml 160 kcal, 3.3 grasas, 23.3 hidratos, 8 proteínas" → {"type":"add_catalog_food","nombre":"Café frío light hacendado","macros_basis":"per_unit","unit_name":"250ml","kcal":160,"proteinas":8,"carbohidratos":23.3,"grasas":3.3}
+"guarda pechuga de pollo al catálogo: por 100g 120 kcal, 2 grasas, 0 hidratos, 24 proteínas" → {"type":"add_catalog_food","nombre":"Pechuga de pollo","macros_basis":"per_100g","kcal":120,"proteinas":24,"carbohidratos":0,"grasas":2}
 "¿cuánto llevo hoy?" → {"type":"check_macros"}
 "mis macros" → {"type":"check_macros"}
 "historial semanal" → {"type":"history"}
@@ -552,6 +566,53 @@ Ejemplos:
 "gracias" → {"type":"chat","reply":"¡De nada! Aquí estoy para lo que necesites. 😊"}
 
 Mensaje del usuario: `;
+
+function heuristicParseCatalogFood(text: string): UserIntent | null {
+  const lower = text.toLowerCase();
+  const hasKcal = /\b\d+(?:[\.,]\d+)?\s*kcal\b/i.test(text);
+  const hasProtein = /\bprote[ií]n(?:a|as)\b/i.test(lower);
+  const hasCarbs = /\b(carbohidratos?|hidratos?)\b/i.test(lower);
+  const hasFat = /\bgrasas?\b/i.test(lower);
+
+  if (!(hasKcal && hasProtein && hasCarbs && hasFat)) return null;
+
+  const kcal = coerceNumber(text.match(/(\d+(?:[\.,]\d+)?)\s*kcal/i)?.[1]);
+  const proteinas = coerceNumber(
+    text.match(/(\d+(?:[\.,]\d+)?)\s*(?:g\s*de\s*)?prote[ií]n(?:a|as)/i)?.[1]
+  );
+  const carbohidratos = coerceNumber(
+    text.match(/(\d+(?:[\.,]\d+)?)\s*(?:g\s*de\s*)?(?:carbohidratos?|hidratos?)/i)?.[1]
+  );
+  const grasas = coerceNumber(text.match(/(\d+(?:[\.,]\d+)?)\s*(?:g\s*de\s*)?grasas?/i)?.[1]);
+
+  if (
+    kcal === undefined ||
+    proteinas === undefined ||
+    carbohidratos === undefined ||
+    grasas === undefined
+  ) {
+    return null;
+  }
+
+  const nameMatch =
+    text.match(/(?:a(?:ñ|n)ade|agrega|guarda|crea)\s+(?:un|una|el|la)?\s*([^,\.]+?)(?:\s*,|\s+por\s+cada|\s+por\s+100)/i) ||
+    text.match(/^([^,\.]+?)\s+(?:por\s+cada|por\s+100)/i);
+  const nombre = (nameMatch?.[1] || "Nuevo alimento").trim();
+
+  const perUnitMatch = text.match(/por\s+cada\s*(\d+\s*(?:ml|g|gr|gramos?|unidad(?:es)?))/i);
+  const explicitPerUnit = /por\s+unidad|unidad(?:es)?/i.test(lower);
+
+  return {
+    type: "add_catalog_food",
+    nombre: nombre.length >= 2 ? nombre : "Nuevo alimento",
+    macros_basis: perUnitMatch || explicitPerUnit ? "per_unit" : "per_100g",
+    unit_name: perUnitMatch?.[1]?.trim(),
+    kcal,
+    proteinas,
+    carbohidratos,
+    grasas,
+  };
+}
 
 export async function parseUserIntent(text: string): Promise<UserIntent> {
   if (!process.env.GOOGLE_API_KEY) {
@@ -588,10 +649,41 @@ export async function parseUserIntent(text: string): Promise<UserIntent> {
           mealType: typeof obj.mealType === "string" ? obj.mealType : undefined,
         };
       }
+
+      if (type === "add_catalog_food") {
+        const kcal = coerceNumber(obj.kcal);
+        const proteinas = coerceNumber(obj.proteinas);
+        const carbohidratos = coerceNumber(obj.carbohidratos);
+        const grasas = coerceNumber(obj.grasas);
+        const fibra = coerceNumber(obj.fibra);
+
+        if (
+          typeof obj.nombre === "string" &&
+          kcal !== undefined &&
+          proteinas !== undefined &&
+          carbohidratos !== undefined &&
+          grasas !== undefined
+        ) {
+          return {
+            type: "add_catalog_food",
+            nombre: obj.nombre,
+            macros_basis: normalizeBasis(obj.macros_basis),
+            unit_name: typeof obj.unit_name === "string" ? obj.unit_name : undefined,
+            kcal,
+            proteinas,
+            carbohidratos,
+            grasas,
+            fibra,
+          };
+        }
+      }
     }
   } catch {
     // fall through to default food search
   }
+
+  const heuristic = heuristicParseCatalogFood(text);
+  if (heuristic) return heuristic;
 
   return { type: "log_food", query: text };
 }

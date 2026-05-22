@@ -1496,6 +1496,44 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
     return
   }
 
+  if (intent.type === 'add_catalog_food') {
+    const draft: CatalogDraft =
+      intent.macros_basis === 'per_unit'
+        ? {
+            nombre: intent.nombre,
+            kcal_100g: 0,
+            proteinas_100g: 0,
+            carbohidratos_100g: 0,
+            grasas_100g: 0,
+            fibra_100g: intent.fibra ?? 0,
+            macros_basis: 'per_unit',
+            unit_name: intent.unit_name || '1 unidad',
+            kcal_per_unit: intent.kcal,
+            proteinas_per_unit: intent.proteinas,
+            carbohidratos_per_unit: intent.carbohidratos,
+            grasas_per_unit: intent.grasas,
+          }
+        : {
+            nombre: intent.nombre,
+            kcal_100g: intent.kcal,
+            proteinas_100g: intent.proteinas,
+            carbohidratos_100g: intent.carbohidratos,
+            grasas_100g: intent.grasas,
+            fibra_100g: intent.fibra ?? 0,
+            macros_basis: 'per_100g',
+          }
+
+    await setSession(chatId, { step: 'awaiting_catalog_confirm', draft })
+
+    await bot.sendMessage(
+      chatId,
+      'Perfecto, he entendido los macros. Revisa y guarda en tu catálogo:',
+      { reply_markup: { inline_keyboard: [[{ text: '❌ Cancelar', callback_data: 'menu' }]] } }
+    )
+    await promptCatalogConfirm(chatId, draft)
+    return
+  }
+
   // log_food (default)
   const mealType: MealType =
     intent.type === 'log_food' && intent.mealType
