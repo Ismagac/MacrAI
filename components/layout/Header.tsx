@@ -27,18 +27,15 @@ export function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-40 flex h-16 items-center gap-4 border-b border-border/70 bg-background/70 backdrop-blur-xl px-4 md:px-6">
+    <header className="sticky top-0 z-40 flex h-16 items-center gap-4 border-b border-border bg-background px-4 md:px-6">
       {/* Mobile logo */}
       <div className="md:hidden flex items-center gap-2">
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-primary">AI</span>
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-primary">M</span>
         <span className="text-lg font-extrabold tracking-tight">MacrAI</span>
       </div>
 
-      <div className="hidden md:flex items-center gap-3">
-        <div className="surface-premium px-3 py-2">
-          <p className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Control Hub</p>
-          <p className="text-sm font-semibold text-foreground">Nutricion y progreso</p>
-        </div>
+      <div className="hidden md:flex items-center gap-3 text-sm text-muted-foreground font-medium">
+        Nutricion y progreso diario
       </div>
 
       <div className="flex-1" />

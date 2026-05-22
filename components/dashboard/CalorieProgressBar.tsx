@@ -34,7 +34,7 @@ export function CalorieProgressBar({ macros, objetivo }: Props) {
       </div>
       <Progress
         value={pct}
-        className={cn('h-3.5 rounded-full bg-muted/70', exceeded && '[&>div]:bg-destructive')}
+        className={cn('h-3.5 rounded-full macro-track [&>div]:bg-primary', exceeded && '[&>div]:bg-destructive')}
       />
       <p className="text-xs text-muted-foreground text-right font-medium">
         {exceeded

@@ -57,27 +57,27 @@ export function MacroSummaryCards({ macros, objetivo }: Props) {
         label={t('protein')}
         value={macros.proteinas}
         goal={objetivo?.proteinas_objetivo}
-        color="bg-blue-500"
+        color="macro-bg-protein"
         icon={<Beef className="h-4 w-4" />}
       />
       <MacroCard
         label={t('carbs')}
         value={macros.carbohidratos}
         goal={objetivo?.carbohidratos_objetivo}
-        color="bg-amber-500"
+        color="macro-bg-carbs"
         icon={<Wheat className="h-4 w-4" />}
       />
       <MacroCard
         label={t('fat')}
         value={macros.grasas}
         goal={objetivo?.grasas_objetivo}
-        color="bg-red-500"
+        color="macro-bg-fat"
         icon={<Droplets className="h-4 w-4" />}
       />
       <MacroCard
         label={t('fiber')}
         value={macros.fibra}
-        color="bg-emerald-500"
+        color="macro-bg-fiber"
         icon={<Leaf className="h-4 w-4" />}
       />
     </div>

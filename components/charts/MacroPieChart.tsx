@@ -8,19 +8,13 @@ interface Props {
   macros: MacrosSummary
 }
 
-const COLORS = {
-  Proteínas: '#3b82f6',
-  Carbohidratos: '#f59e0b',
-  Grasas: '#ef4444',
-}
-
 export function MacroPieChart({ macros }: Props) {
   const t = useTranslations('dashboard')
 
   const data = [
-    { name: t('protein'), value: Math.round(macros.proteinas * 4), grams: macros.proteinas, color: '#3b82f6' },
-    { name: t('carbs'), value: Math.round(macros.carbohidratos * 4), grams: macros.carbohidratos, color: '#f59e0b' },
-    { name: t('fat'), value: Math.round(macros.grasas * 9), grams: macros.grasas, color: '#ef4444' },
+    { name: t('protein'), value: Math.round(macros.proteinas * 4), grams: macros.proteinas, color: 'var(--macro-protein)' },
+    { name: t('carbs'), value: Math.round(macros.carbohidratos * 4), grams: macros.carbohidratos, color: 'var(--macro-carbs)' },
+    { name: t('fat'), value: Math.round(macros.grasas * 9), grams: macros.grasas, color: 'var(--macro-fat)' },
   ].filter((d) => d.value > 0)
 
   const total = data.reduce((s, d) => s + d.value, 0)

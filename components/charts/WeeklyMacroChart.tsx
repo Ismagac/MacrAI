@@ -36,7 +36,7 @@ export function WeeklyMacroChart({ stats }: Props) {
   return (
     <ResponsiveContainer width="100%" height={260}>
       <BarChart data={data} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border) / 0.7)" />
         <XAxis
           dataKey="fecha"
           tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
@@ -52,9 +52,9 @@ export function WeeklyMacroChart({ stats }: Props) {
           formatter={(v: number) => [`${v}g`]}
         />
         <Legend formatter={(v) => <span className="text-xs">{v}</span>} />
-        <Bar dataKey={t('protein')} stackId="a" fill="#3b82f6" radius={[0, 0, 0, 0]} />
-        <Bar dataKey={t('carbs')} stackId="a" fill="#f59e0b" />
-        <Bar dataKey={t('fat')} stackId="a" fill="#ef4444" radius={[4, 4, 0, 0]} />
+        <Bar dataKey={t('protein')} stackId="a" fill="var(--macro-protein)" radius={[0, 0, 0, 0]} />
+        <Bar dataKey={t('carbs')} stackId="a" fill="var(--macro-carbs)" />
+        <Bar dataKey={t('fat')} stackId="a" fill="var(--macro-fat)" radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   )
