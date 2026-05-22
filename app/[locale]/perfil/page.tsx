@@ -52,6 +52,19 @@ export default function PerfilPage() {
     setAccentTheme(getStoredAccentTheme())
   }, [])
 
+  useEffect(() => {
+    if (!profile) return
+
+    if (profile.accent_theme) {
+      setStoredAccentTheme(profile.accent_theme)
+      setAccentTheme(profile.accent_theme)
+    }
+
+    if (profile.theme_mode) {
+      setTheme(profile.theme_mode)
+    }
+  }, [profile, setTheme])
+
   const {
     register,
     handleSubmit,
@@ -91,6 +104,23 @@ export default function PerfilPage() {
     if (!err) toast({ title: t('saved') })
   }
 
+  async function handleThemeModeChange(mode: 'light' | 'dark' | 'system') {
+    setTheme(mode)
+    const err = await updateProfile({ theme_mode: mode })
+    if (err) {
+      toast({ title: 'No se pudo guardar el modo de tema', variant: 'destructive' })
+    }
+  }
+
+  async function handleAccentThemeChange(color: AccentTheme) {
+    setStoredAccentTheme(color)
+    setAccentTheme(color)
+    const err = await updateProfile({ accent_theme: color })
+    if (err) {
+      toast({ title: 'No se pudo guardar el color primario', variant: 'destructive' })
+    }
+  }
+
   function useTDEEAsGoal() {
     if (tdee) router.push(`/${locale}/objetivos?kcal=${tdee.tdee}`)
   }
@@ -114,7 +144,7 @@ export default function PerfilPage() {
                   type="button"
                   variant={theme === 'light' ? 'default' : 'outline'}
                   size="sm"
-                  onClick={() => setTheme('light')}
+                  onClick={() => handleThemeModeChange('light')}
                 >
                   {t('themeLight')}
                 </Button>
@@ -122,7 +152,7 @@ export default function PerfilPage() {
                   type="button"
                   variant={theme === 'dark' ? 'default' : 'outline'}
                   size="sm"
-                  onClick={() => setTheme('dark')}
+                  onClick={() => handleThemeModeChange('dark')}
                 >
                   {t('themeDark')}
                 </Button>
@@ -130,7 +160,7 @@ export default function PerfilPage() {
                   type="button"
                   variant={theme === 'system' ? 'default' : 'outline'}
                   size="sm"
-                  onClick={() => setTheme('system')}
+                  onClick={() => handleThemeModeChange('system')}
                 >
                   {t('themeSystem')}
                 </Button>
@@ -156,10 +186,7 @@ export default function PerfilPage() {
                     <button
                       key={color}
                       type="button"
-                      onClick={() => {
-                        setStoredAccentTheme(color)
-                        setAccentTheme(color)
-                      }}
+                      onClick={() => handleAccentThemeChange(color)}
                       className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition hover:scale-[1.02] ${accentTheme === color ? 'border-primary ring-2 ring-primary/40' : 'border-border'}`}
                     >
                       <span className={`h-3.5 w-3.5 rounded-full ${bg}`} />

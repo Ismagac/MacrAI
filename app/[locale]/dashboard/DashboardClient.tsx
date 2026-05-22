@@ -59,16 +59,20 @@ export function DashboardClient({ initialConsumos, objetivo, today, locale }: Pr
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div className="surface-card surface-glow p-4 md:p-6">
+      <div className="surface-premium p-4 md:p-6">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.14em] text-primary/80 font-semibold">MacrAI Daily Pulse</p>
+            <p className="text-xs uppercase tracking-[0.16em] text-primary/80 font-semibold">MacrAI Performance Board</p>
             <h1 className="text-2xl md:text-3xl font-extrabold mt-1">{t('title')}</h1>
             <p className="text-sm text-muted-foreground capitalize mt-1">
               {format(new Date(today + 'T12:00:00'), "EEEE, d 'de' MMMM", { locale: es })}
             </p>
+            <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-primary/12 px-3 py-1 text-xs font-semibold text-primary">
+              <span className="h-2 w-2 rounded-full bg-primary" />
+              Seguimiento diario activo
+            </div>
           </div>
-          <Button onClick={() => setModalOpen(true)} size="sm" className="shrink-0">
+          <Button onClick={() => setModalOpen(true)} size="sm" className="shrink-0 shadow-[0_14px_28px_-18px_hsl(var(--primary)/0.95)]">
             <Plus className="h-4 w-4 mr-1" />
             {t('addFood')}
           </Button>
@@ -76,7 +80,7 @@ export function DashboardClient({ initialConsumos, objetivo, today, locale }: Pr
       </div>
 
       {/* Calorie progress */}
-      <Card className="surface-glow">
+      <Card className="surface-premium">
         <CardContent className="pt-6">
           <CalorieProgressBar macros={macros} objetivo={objetivo} />
         </CardContent>
@@ -90,7 +94,7 @@ export function DashboardClient({ initialConsumos, objetivo, today, locale }: Pr
 
       {/* Chart + Recent log */}
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
+        <Card className="surface-card">
           <CardHeader>
             <CardTitle className="text-base">{t('todayMacros')}</CardTitle>
           </CardHeader>
@@ -99,7 +103,7 @@ export function DashboardClient({ initialConsumos, objetivo, today, locale }: Pr
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="surface-card">
           <CardHeader>
             <CardTitle className="text-base">{t('recentLog')}</CardTitle>
           </CardHeader>
