@@ -44,12 +44,16 @@ function shouldTryNextModel(error: unknown): boolean {
   const normalized = msg.toLowerCase();
   return (
     normalized.includes("404") ||
+    normalized.includes("503") ||
     normalized.includes("not found") ||
     normalized.includes("not supported") ||
     normalized.includes("is not found for api version") ||
     normalized.includes("permission") ||
     normalized.includes("quota") ||
-    normalized.includes("429")
+    normalized.includes("429") ||
+    normalized.includes("unavailable") ||
+    normalized.includes("high demand") ||
+    normalized.includes("try again later")
   );
 }
 
