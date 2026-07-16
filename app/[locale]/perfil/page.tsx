@@ -24,7 +24,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/components/ui/use-toast'
 import type { ActivityLevel, Sexo } from '@/types'
-import { Zap } from 'lucide-react'
+import { Zap, KeyRound } from 'lucide-react'
 import { ACCENT_THEMES, type AccentTheme, getStoredAccentTheme, setStoredAccentTheme } from '@/lib/theme/accent'
 
 const schema = z.object({
@@ -47,9 +47,25 @@ export default function PerfilPage() {
   const { profile, loading, updateProfile } = useProfile()
   const { toast } = useToast()
   const [accentTheme, setAccentTheme] = useState<AccentTheme>('green')
+  const [llmProvider, setLlmProvider] = useState('groq')
+  const [llmKey, setLlmKey] = useState('')
+  const [llmConfigured, setLlmConfigured] = useState<string | null>(null)
+  const [llmSaving, setLlmSaving] = useState(false)
 
   useEffect(() => {
     setAccentTheme(getStoredAccentTheme())
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/llm-key')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.hasKey) {
+          setLlmConfigured(d.provider)
+          setLlmProvider(d.provider)
+        }
+      })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -125,6 +141,40 @@ export default function PerfilPage() {
     if (tdee) router.push(`/${locale}/objetivos?kcal=${tdee.tdee}`)
   }
 
+  async function handleSaveLlmKey() {
+    if (!llmKey.trim()) return
+    setLlmSaving(true)
+    try {
+      const res = await fetch('/api/llm-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: llmProvider, apiKey: llmKey.trim() }),
+      })
+      if (!res.ok) throw new Error()
+      setLlmConfigured(llmProvider)
+      setLlmKey('')
+      toast({ title: t('aiSaved') })
+    } catch {
+      toast({ title: t('aiError'), variant: 'destructive' })
+    } finally {
+      setLlmSaving(false)
+    }
+  }
+
+  async function handleDeleteLlmKey() {
+    setLlmSaving(true)
+    try {
+      const res = await fetch('/api/llm-key', { method: 'DELETE' })
+      if (!res.ok) throw new Error()
+      setLlmConfigured(null)
+      toast({ title: t('aiDeleted') })
+    } catch {
+      toast({ title: t('aiError'), variant: 'destructive' })
+    } finally {
+      setLlmSaving(false)
+    }
+  }
+
   if (loading) return <AppLayout><p className="text-muted-foreground">Cargando...</p></AppLayout>
 
   return (
@@ -195,6 +245,60 @@ export default function PerfilPage() {
                   )
                 })}
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-primary" />
+              {t('aiTitle')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">{t('aiDescription')}</p>
+
+            {llmConfigured && (
+              <p className="text-sm font-medium text-primary">
+                ✅ {t('aiConfigured', { provider: llmConfigured })}
+              </p>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>{t('aiProvider')}</Label>
+                <Select value={llmProvider} onValueChange={setLlmProvider}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="groq">Groq</SelectItem>
+                    <SelectItem value="gemini">Google Gemini</SelectItem>
+                    <SelectItem value="openrouter">OpenRouter</SelectItem>
+                    <SelectItem value="xai">xAI (Grok)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>{t('aiKey')}</Label>
+                <Input
+                  type="password"
+                  value={llmKey}
+                  onChange={(e) => setLlmKey(e.target.value)}
+                  placeholder={t('aiKeyPlaceholder')}
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleSaveLlmKey} disabled={llmSaving || !llmKey.trim()}>
+                {t('aiSave')}
+              </Button>
+              {llmConfigured && (
+                <Button size="sm" variant="outline" onClick={handleDeleteLlmKey} disabled={llmSaving}>
+                  {t('aiDelete')}
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>

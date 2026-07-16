@@ -6,7 +6,8 @@
     "alimentos": "Alimentos",
     "perfil": "Perfil",
     "objetivos": "Objetivos",
-    "logout": "Cerrar sesión"
+    "logout": "Cerrar sesión",
+    "chat": "Chat"
   },
   "auth": {
     "login": "Iniciar sesión",
@@ -125,7 +126,18 @@
     "bmr": "TMB (Metabolismo basal)",
     "useTdee": "Usar como objetivo diario",
     "save": "Guardar cambios",
-    "saved": "Perfil guardado"
+    "saved": "Perfil guardado",
+    "aiTitle": "IA — clave propia (opcional)",
+    "aiDescription": "Usa tu propia clave API para que MacrAI no dependa de la cuota compartida. Se guarda cifrada.",
+    "aiProvider": "Proveedor",
+    "aiKey": "Clave API",
+    "aiKeyPlaceholder": "Pega aquí tu clave",
+    "aiSave": "Guardar clave",
+    "aiDelete": "Quitar",
+    "aiSaved": "Clave guardada",
+    "aiDeleted": "Clave eliminada",
+    "aiError": "No se pudo guardar la clave",
+    "aiConfigured": "Clave configurada ({provider})"
   },
   "objetivos": {
     "title": "Objetivos",

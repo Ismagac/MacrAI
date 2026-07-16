@@ -11,10 +11,12 @@ import {
   User,
   Target,
   Zap,
+  MessageCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 
 const navItems = [
+  { key: 'chat', href: '/chat', icon: MessageCircle },
   { key: 'dashboard', href: '/dashboard', icon: LayoutDashboard },
   { key: 'log', href: '/log', icon: BookOpen },
   { key: 'historial', href: '/historial', icon: History },

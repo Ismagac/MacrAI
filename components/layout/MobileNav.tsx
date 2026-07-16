@@ -3,15 +3,15 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
-import { LayoutDashboard, BookOpen, History, Apple, Target } from 'lucide-react'
+import { LayoutDashboard, BookOpen, History, Apple, MessageCircle } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 
 const items = [
+  { key: 'chat', href: '/chat', icon: MessageCircle },
   { key: 'dashboard', href: '/dashboard', icon: LayoutDashboard },
   { key: 'log', href: '/log', icon: BookOpen },
   { key: 'historial', href: '/historial', icon: History },
   { key: 'alimentos', href: '/alimentos', icon: Apple },
-  { key: 'objetivos', href: '/objetivos', icon: Target },
 ] as const
 
 export function MobileNav() {

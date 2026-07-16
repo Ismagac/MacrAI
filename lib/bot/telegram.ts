@@ -11,7 +11,9 @@
 import TelegramBot from 'node-telegram-bot-api'
 import { createClient } from '@supabase/supabase-js'
 import { searchOpenFoodFacts } from '@/lib/api/openfoodfacts'
-import { detectMacrosFromImage, parseUserIntent, type MacroDetectionResult } from '@/lib/api/gemini'
+import { detectMacrosFromImage, parseUserIntent, type MacroDetectionResult } from '@/lib/api/ai'
+import { decryptSecret } from '@/lib/utils/crypto'
+import type { LlmProviderId, UserLlmKey } from '@/lib/api/llm'
 import type { FoodItem, MacrosBasis } from '@/types'
 
 // ─── Singleton bot instance (no polling) ─────────────────────────────────────
@@ -32,6 +34,21 @@ function getDb() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
+}
+
+// Clave LLM propia del usuario vinculado a este chat, si la tiene
+async function getChatLlmKey(chatId: number): Promise<UserLlmKey | null> {
+  try {
+    const { data } = await getDb().rpc('bot_get_llm_key', { p_chat_id: chatId })
+    const row = Array.isArray(data) ? data[0] : data
+    if (!row?.api_key_enc) return null
+    return {
+      provider: row.provider as LlmProviderId,
+      apiKey: decryptSecret(row.api_key_enc),
+    }
+  } catch {
+    return null
+  }
 }
 
 // ─── Session state types ──────────────────────────────────────────────────────
@@ -346,7 +363,7 @@ async function handleCatalogPhoto(chatId: number, fileId: string) {
   }
 
   await bot.sendMessage(chatId, '🤖 Analizando con IA... máximo ~20s. Si no, pasamos a modo manual.')
-  const detected = await detectMacrosFromImage(buffer)
+  const detected = await detectMacrosFromImage(buffer, await getChatLlmKey(chatId))
 
   const hasDetectedMacros =
     detected.proteins !== undefined ||
@@ -1438,7 +1455,7 @@ export async function handleUpdate(update: TelegramBot.Update): Promise<void> {
   }
 
   // ── Default: use AI to understand the user's intent ──
-  const intent = await parseUserIntent(text)
+  const intent = await parseUserIntent(text, await getChatLlmKey(chatId))
 
   if (intent.type === 'check_macros') {
     await handleMacrosToday(chatId)

@@ -1,144 +1,6 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { llmChat, type UserLlmKey } from "./llm";
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "");
-
-const PREFERRED_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-1.5-flash-latest",
-];
-
-const LIST_MODELS_TIMEOUT_MS = 2500;
-const GEMINI_MODEL_TIMEOUT_MS = 7000;
-const GEMINI_TOTAL_TIMEOUT_MS = 20000;
-
-type CachedModels = {
-  expiresAt: number;
-  models: string[];
-};
-
-let modelCache: CachedModels | null = null;
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    promise
-      .then((value) => {
-        clearTimeout(timer);
-        resolve(value);
-      })
-      .catch((err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-  });
-}
-
-function shouldTryNextModel(error: unknown): boolean {
-  const msg = error instanceof Error ? error.message : String(error);
-  const normalized = msg.toLowerCase();
-  return (
-    normalized.includes("404") ||
-    normalized.includes("503") ||
-    normalized.includes("not found") ||
-    normalized.includes("not supported") ||
-    normalized.includes("is not found for api version") ||
-    normalized.includes("permission") ||
-    normalized.includes("quota") ||
-    normalized.includes("429") ||
-    normalized.includes("unavailable") ||
-    normalized.includes("high demand") ||
-    normalized.includes("try again later")
-  );
-}
-
-async function listAvailableGenerateModels(apiKey: string): Promise<string[]> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
-  const response = await withTimeout(fetch(url), LIST_MODELS_TIMEOUT_MS, "Gemini listModels");
-  if (!response.ok) {
-    throw new Error(`listModels failed with HTTP ${response.status}`);
-  }
-
-  const body = (await response.json()) as {
-    models?: Array<{
-      name?: string;
-      supportedGenerationMethods?: string[];
-    }>;
-  };
-
-  const available = (body.models ?? [])
-    .filter((m) => (m.supportedGenerationMethods ?? []).includes("generateContent"))
-    .map((m) => (m.name ?? "").replace(/^models\//, ""))
-    .filter(Boolean);
-
-  return available;
-}
-
-async function getModelCandidates(): Promise<string[]> {
-  const now = Date.now();
-  if (modelCache && modelCache.expiresAt > now && modelCache.models.length > 0) {
-    return modelCache.models;
-  }
-
-  const apiKey = process.env.GOOGLE_API_KEY;
-  if (!apiKey) return PREFERRED_MODELS;
-
-  try {
-    const available = await listAvailableGenerateModels(apiKey);
-    const ranked = [
-      ...PREFERRED_MODELS.filter((m) => available.includes(m)),
-      ...available.filter((m) => !PREFERRED_MODELS.includes(m) && m.includes("flash")),
-    ];
-
-    const models = ranked.length > 0 ? ranked : PREFERRED_MODELS;
-    modelCache = {
-      models,
-      expiresAt: now + 30 * 60 * 1000,
-    };
-    return models;
-  } catch {
-    return PREFERRED_MODELS;
-  }
-}
-
-async function generateWithModelFallback(
-  parts: Array<{ inlineData: { data: string; mimeType: string } } | string>
-) {
-  let lastError: unknown = null;
-  const candidates = await getModelCandidates();
-
-  for (const modelName of candidates) {
-    try {
-      const model = genAI.getGenerativeModel({
-        model: modelName,
-        generationConfig: {
-          temperature: 0.1,
-          topP: 0.1,
-          maxOutputTokens: 400,
-        },
-      });
-
-      const response = await withTimeout(
-        model.generateContent(parts),
-        GEMINI_MODEL_TIMEOUT_MS,
-        `Gemini model ${modelName}`
-      );
-      return response;
-    } catch (error) {
-      lastError = error;
-      if (!shouldTryNextModel(error)) {
-        throw error;
-      }
-    }
-  }
-
-  throw lastError ?? new Error("No Gemini model available");
-}
+const VISION_TIMEOUT_MS = 20000;
 
 function normalizeImageInput(imageData: string | Buffer): { base64Image: string; mimeType: string } {
   if (Buffer.isBuffer(imageData)) {
@@ -256,26 +118,29 @@ function hasAnyMacro(values: {
   );
 }
 
-async function runPrompt(
+async function runVisionPrompt(
   base64Image: string,
   mimeType: string,
-  prompt: string
+  prompt: string,
+  userKey?: UserLlmKey | null
 ): Promise<{ parsed: Record<string, unknown>; responseText: string }> {
-  const response = await withTimeout(
-    generateWithModelFallback([
+  const responseText = await llmChat({
+    task: "vision",
+    timeoutMs: VISION_TIMEOUT_MS,
+    temperature: 0.1,
+    maxTokens: 400,
+    userKey,
+    messages: [
       {
-        inlineData: {
-          data: base64Image,
-          mimeType,
-        },
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+          { type: "text", text: prompt },
+        ],
       },
-      prompt,
-    ]),
-    GEMINI_TOTAL_TIMEOUT_MS,
-    "Gemini macro detection"
-  );
+    ],
+  });
 
-  const responseText = response.response.candidates?.[0]?.content?.parts?.[0]?.text || "";
   const jsonChunk = extractJsonObject(responseText);
   let parsed: Record<string, unknown> = {};
 
@@ -305,20 +170,14 @@ export interface MacroDetectionResult {
 }
 
 /**
- * Detecta macros de una imagen de comida usando Google Gemini Vision API
+ * Detecta macros de una imagen de comida usando la cadena de proveedores LLM
  * Funciona con fotos de etiquetas nutricionales, paquetes de alimentos, o platos
  */
 export async function detectMacrosFromImage(
-  imageData: string | Buffer
+  imageData: string | Buffer,
+  userKey?: UserLlmKey | null
 ): Promise<MacroDetectionResult> {
   try {
-    if (!process.env.GOOGLE_API_KEY) {
-      return {
-        success: false,
-        error: "GOOGLE_API_KEY not configured",
-      };
-    }
-
     const { base64Image, mimeType } = normalizeImageInput(imageData);
 
     const prompt = `Extrae macros nutricionales de esta imagen.
@@ -341,14 +200,14 @@ Reglas:
 - Si un valor no es legible, usa null.
 - No añadas texto fuera del JSON.`;
 
-    const first = await runPrompt(base64Image, mimeType, prompt);
+    const first = await runVisionPrompt(base64Image, mimeType, prompt, userKey);
     let responseText = first.responseText;
     let parsed = first.parsed;
 
     if (!responseText) {
       return {
         success: false,
-        error: "No response from Gemini API",
+        error: "No response from LLM providers",
       };
     }
 
@@ -385,7 +244,7 @@ calories=<numero>
 
 Si un valor no se ve, usa null.`;
 
-      const second = await runPrompt(base64Image, mimeType, recoveryPrompt);
+      const second = await runVisionPrompt(base64Image, mimeType, recoveryPrompt, userKey);
       responseText = second.responseText || responseText;
       parsed = second.parsed;
       const secondMacros = extractMacros(responseText, parsed);
@@ -418,7 +277,7 @@ Si un valor no se ve, usa null.`;
   } catch (error) {
     console.error("Error in detectMacrosFromImage:", error);
     const msg = error instanceof Error ? error.message : "Unknown error";
-    const isTimeout = msg.toLowerCase().includes("timed out");
+    const isTimeout = msg.toLowerCase().includes("timed out") || msg.toLowerCase().includes("abort");
     return {
       success: false,
       error: isTimeout
@@ -431,93 +290,41 @@ Si un valor no se ve, usa null.`;
 /**
  * Detecta si una imagen contiene una etiqueta nutricional legible
  */
-export async function isNutritionLabel(imageData: string | Buffer): Promise<{
+export async function isNutritionLabel(
+  imageData: string | Buffer,
+  userKey?: UserLlmKey | null
+): Promise<{
   isLabel: boolean;
   confidence: number;
   description?: string;
 }> {
   try {
-    if (!process.env.GOOGLE_API_KEY) {
-      return { isLabel: false, confidence: 0 };
-    }
-
     const { base64Image, mimeType } = normalizeImageInput(imageData);
 
-    const response = await withTimeout(
-      generateWithModelFallback([
-        {
-          inlineData: {
-            data: base64Image,
-            mimeType,
-          },
-        },
-        '¿Esta imagen contiene una etiqueta nutricional legible o datos de macros? Responde SOLO JSON: {"isLabel": boolean, "confidence": number, "description": "string"}',
-      ]),
-      GEMINI_TOTAL_TIMEOUT_MS,
-      "Gemini nutrition-label detection"
+    const { parsed, responseText } = await runVisionPrompt(
+      base64Image,
+      mimeType,
+      '¿Esta imagen contiene una etiqueta nutricional legible o datos de macros? Responde SOLO JSON: {"isLabel": boolean, "confidence": number, "description": "string"}',
+      userKey
     );
 
-    const responseText = response.response.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const jsonChunk = extractJsonObject(responseText);
+    if (!responseText) {
+      return { isLabel: false, confidence: 0, description: "No response" };
+    }
 
-    if (!jsonChunk) {
+    if (Object.keys(parsed).length === 0) {
       return { isLabel: false, confidence: 0, description: "No JSON" };
     }
 
-    try {
-      const parsed = JSON.parse(jsonChunk) as {
-        isLabel?: boolean;
-        confidence?: number | string;
-        description?: string;
-      };
-
-      return {
-        isLabel: Boolean(parsed.isLabel),
-        confidence: coerceNumber(parsed.confidence) ?? 0,
-        description: parsed.description,
-      };
-    } catch {
-      return { isLabel: false, confidence: 0, description: "JSON inválido" };
-    }
+    return {
+      isLabel: Boolean(parsed.isLabel),
+      confidence: coerceNumber(parsed.confidence) ?? 0,
+      description: typeof parsed.description === "string" ? parsed.description : undefined,
+    };
   } catch (error) {
     console.error("Error in isNutritionLabel:", error);
     return { isLabel: false, confidence: 0 };
   }
-}
-
-// ─── Text-only generation helper ──────────────────────────────────────────────
-
-async function generateTextWithFallback(
-  prompt: string,
-  config?: { temperature?: number; maxOutputTokens?: number }
-): Promise<string> {
-  let lastError: unknown = null;
-  const candidates = await getModelCandidates();
-
-  for (const modelName of candidates) {
-    try {
-      const model = genAI.getGenerativeModel({
-        model: modelName,
-        generationConfig: {
-          temperature: config?.temperature ?? 0.1,
-          topP: 0.8,
-          maxOutputTokens: config?.maxOutputTokens ?? 300,
-        },
-      });
-
-      const response = await withTimeout(
-        model.generateContent([prompt]),
-        GEMINI_MODEL_TIMEOUT_MS,
-        `Gemini text ${modelName}`
-      );
-      return response.response.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    } catch (error) {
-      lastError = error;
-      if (!shouldTryNextModel(error)) throw error;
-    }
-  }
-
-  throw lastError ?? new Error("No Gemini model available");
 }
 
 // ─── User Intent Parser ───────────────────────────────────────────────────────
@@ -614,20 +421,16 @@ function heuristicParseCatalogFood(text: string): UserIntent | null {
   };
 }
 
-export async function parseUserIntent(text: string): Promise<UserIntent> {
-  if (!process.env.GOOGLE_API_KEY) {
-    return { type: "log_food", query: text };
-  }
-
+export async function parseUserIntent(text: string, userKey?: UserLlmKey | null): Promise<UserIntent> {
   try {
-    const raw = await withTimeout(
-      generateTextWithFallback(INTENT_SYSTEM_PROMPT + JSON.stringify(text), {
-        temperature: 0.1,
-        maxOutputTokens: 150,
-      }),
-      6000,
-      "Gemini intent parse"
-    );
+    const raw = await llmChat({
+      task: "text",
+      temperature: 0.1,
+      maxTokens: 150,
+      timeoutMs: 6000,
+      userKey,
+      messages: [{ role: "user", content: INTENT_SYSTEM_PROMPT + JSON.stringify(text) }],
+    });
 
     const jsonStr = extractJsonObject(raw);
     if (jsonStr) {
@@ -695,7 +498,8 @@ export type AgentMessage = { role: "user" | "assistant"; content: string };
 export async function generateAgentReply(
   userMessage: string,
   context: string,
-  history: AgentMessage[] = []
+  history: AgentMessage[] = [],
+  userKey?: UserLlmKey | null
 ): Promise<string> {
   const systemPrompt =
     `Eres MacrAI, el asistente personal de nutrición integrado en la app.\n` +
@@ -703,22 +507,19 @@ export async function generateAgentReply(
     `No expliques lo que vas a hacer, hazlo. Usa los datos del contexto cuando sean relevantes.\n` +
     (context ? `\n[Datos del usuario]\n${context}\n` : "");
 
-  const historyText = history
-    .slice(-6)
-    .map((m) => `${m.role === "user" ? "Usuario" : "MacrAI"}: ${m.content}`)
-    .join("\n");
-
-  const fullPrompt =
-    systemPrompt +
-    (historyText ? `\n[Conversación previa]\n${historyText}\n` : "") +
-    `\nUsuario: ${userMessage}\nMacrAI:`;
-
   try {
-    return await withTimeout(
-      generateTextWithFallback(fullPrompt, { temperature: 0.7, maxOutputTokens: 350 }),
-      10000,
-      "Gemini agent reply"
-    );
+    return await llmChat({
+      task: "text",
+      temperature: 0.7,
+      maxTokens: 350,
+      timeoutMs: 10000,
+      userKey,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...history.slice(-6).map((m) => ({ role: m.role, content: m.content } as const)),
+        { role: "user", content: userMessage },
+      ],
+    });
   } catch {
     return "Lo siento, no pude procesar tu mensaje ahora mismo. ¿Puedo ayudarte con algo más?";
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { parseUserIntent, generateAgentReply, type AgentMessage } from '@/lib/api/gemini'
+import { parseUserIntent, generateAgentReply, type AgentMessage } from '@/lib/api/ai'
+import { getUserLlmKey } from '@/lib/api/byok'
 import { searchOpenFoodFacts } from '@/lib/api/openfoodfacts'
 import type { FoodItem } from '@/types'
 
@@ -47,7 +48,7 @@ type HistoryDayData = {
 
 export type AgentApiResponse = {
   reply: string
-  action?: 'food_options' | 'macros_data' | 'history_data' | 'catalog_data'
+  action?: 'food_options' | 'macros_data' | 'history_data' | 'catalog_data' | 'food_saved' | 'need_details'
   data?: {
     foods?: FoodOptionItem[]
     qty?: number
@@ -56,6 +57,7 @@ export type AgentApiResponse = {
     macros?: MacroData
     days?: HistoryDayData[]
     catalog?: FoodOptionItem[]
+    savedFood?: { nombre: string; kcal: number; basis: string; unitName?: string }
   }
 }
 
@@ -88,8 +90,10 @@ export async function POST(request: NextRequest) {
 
   const today = new Date().toISOString().split('T')[0]
 
+  const userKey = await getUserLlmKey(supabase, user.id)
+
   // Parse intent
-  const intent = await parseUserIntent(message)
+  const intent = await parseUserIntent(message, userKey)
 
   let context = ''
   let actionType: AgentApiResponse['action']
@@ -220,14 +224,66 @@ export async function POST(request: NextRequest) {
     }))
 
     const foods = [...userFoods, ...globalFoods].slice(0, 8)
-    context =
-      `El usuario quiere registrar "${query}"` +
-      (intent.qty ? ` (${intent.qty}g)` : '') +
-      (intent.mealType ? ` en ${intent.mealType}` : '') +
-      `. Encontré ${foods.length} opciones.`
 
-    actionType = 'food_options'
-    actionData = { foods, qty: intent.qty, mealType: intent.mealType, query }
+    if (foods.length === 0) {
+      context =
+        `El usuario quiere registrar "${query}" pero no encontré ese alimento en ninguna base de datos. ` +
+        `Pídele que te mande una foto de la etiqueta nutricional, o que te dicte los macros ` +
+        `(kcal, proteínas, carbohidratos y grasas por 100g o por unidad) para guardarlo en su catálogo.`
+      actionType = 'need_details'
+      actionData = { query, qty: intent.qty, mealType: intent.mealType }
+    } else {
+      context =
+        `El usuario quiere registrar "${query}"` +
+        (intent.qty ? ` (${intent.qty}g)` : '') +
+        (intent.mealType ? ` en ${intent.mealType}` : '') +
+        `. Encontré ${foods.length} opciones.`
+
+      actionType = 'food_options'
+      actionData = { foods, qty: intent.qty, mealType: intent.mealType, query }
+    }
+  }
+
+  // ── add_catalog_food ──
+  else if (intent.type === 'add_catalog_food') {
+    const isPerUnit = intent.macros_basis === 'per_unit'
+    const { data: saved, error: saveError } = await supabase
+      .from('alimentos_usuario')
+      .insert({
+        user_id: user.id,
+        nombre: intent.nombre,
+        macros_basis: intent.macros_basis,
+        unit_name: intent.unit_name ?? null,
+        kcal_100g: isPerUnit ? 0 : intent.kcal,
+        proteinas_100g: isPerUnit ? 0 : intent.proteinas,
+        grasas_100g: isPerUnit ? 0 : intent.grasas,
+        carbohidratos_100g: isPerUnit ? 0 : intent.carbohidratos,
+        fibra_100g: isPerUnit ? 0 : (intent.fibra ?? 0),
+        kcal_per_unit: isPerUnit ? intent.kcal : null,
+        proteinas_per_unit: isPerUnit ? intent.proteinas : null,
+        grasas_per_unit: isPerUnit ? intent.grasas : null,
+        carbohidratos_per_unit: isPerUnit ? intent.carbohidratos : null,
+      })
+      .select('nombre')
+      .single()
+
+    if (saveError || !saved) {
+      context = `Intenté guardar "${intent.nombre}" en el catálogo del usuario pero falló. Discúlpate brevemente.`
+    } else {
+      context =
+        `Guardado en el catálogo del usuario: "${intent.nombre}" ` +
+        `(${intent.kcal} kcal, ${intent.proteinas}g proteínas, ${intent.carbohidratos}g carbohidratos, ${intent.grasas}g grasas ` +
+        `${isPerUnit ? `por ${intent.unit_name ?? 'unidad'}` : 'por 100g'}). Confírmaselo en una frase.`
+      actionType = 'food_saved'
+      actionData = {
+        savedFood: {
+          nombre: intent.nombre,
+          kcal: intent.kcal,
+          basis: intent.macros_basis,
+          unitName: intent.unit_name,
+        },
+      }
+    }
   }
 
   // ── edit_log ──
@@ -238,7 +294,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Generate conversational reply
-  const reply = await generateAgentReply(message, context, safeHistory)
+  const reply = await generateAgentReply(message, context, safeHistory, userKey)
 
   const response: AgentApiResponse = {
     reply,

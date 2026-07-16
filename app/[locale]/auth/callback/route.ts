@@ -15,6 +15,6 @@ export async function GET(
   }
 
   return NextResponse.redirect(
-    new URL(`/${locale}/dashboard`, request.url)
+    new URL(`/${locale}/chat`, request.url)
   )
 }

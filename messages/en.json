@@ -6,7 +6,8 @@
     "alimentos": "Foods",
     "perfil": "Profile",
     "objetivos": "Goals",
-    "logout": "Log out"
+    "logout": "Log out",
+    "chat": "Chat"
   },
   "auth": {
     "login": "Sign in",
@@ -125,7 +126,18 @@
     "bmr": "BMR (Basal Metabolic Rate)",
     "useTdee": "Use as daily goal",
     "save": "Save changes",
-    "saved": "Profile saved"
+    "saved": "Profile saved",
+    "aiTitle": "AI — your own key (optional)",
+    "aiDescription": "Use your own API key so MacrAI does not depend on the shared quota. Stored encrypted.",
+    "aiProvider": "Provider",
+    "aiKey": "API key",
+    "aiKeyPlaceholder": "Paste your key here",
+    "aiSave": "Save key",
+    "aiDelete": "Remove",
+    "aiSaved": "Key saved",
+    "aiDeleted": "Key removed",
+    "aiError": "Could not save the key",
+    "aiConfigured": "Key configured ({provider})"
   },
   "objetivos": {
     "title": "Goals",

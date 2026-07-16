@@ -45,7 +45,7 @@ export default function LoginPage() {
       setServerError(t('loginError'))
       return
     }
-    router.push(`/${locale}/dashboard`)
+    router.push(`/${locale}/chat`)
     router.refresh()
   }
 
