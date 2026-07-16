@@ -16,7 +16,7 @@ export async function searchOpenFoodFacts(
   })
 
   const url = `${OFF_BASE}?${params.toString()}`
-  const headers = { 'User-Agent': 'FitIA/1.0 (https://github.com/fitia)' }
+  const headers = { 'User-Agent': 'MacrAI/1.0 (https://github.com/macrai)' }
 
   // Try up to 3 times with increasing delay on 503
   for (let attempt = 0; attempt < 3; attempt++) {
