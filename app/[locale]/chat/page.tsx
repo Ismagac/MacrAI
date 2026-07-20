@@ -2,15 +2,16 @@
 
 import { AppLayout } from '@/components/layout/AppLayout'
 import { ChatCore } from '@/components/chat/ChatCore'
+import { LogoMark } from '@/components/brand/Logo'
 
 export default function ChatPage() {
   return (
     <AppLayout>
-      <div className="mx-auto flex h-[calc(100vh-10rem)] max-w-3xl flex-col rounded-2xl border border-border bg-background shadow-sm">
-        <div className="flex items-center gap-2 rounded-t-2xl bg-primary/10 px-4 py-3 border-b border-border">
-          <span className="text-lg">🤖</span>
+      <div className="mx-auto flex h-[calc(100vh-11rem)] md:h-[calc(100vh-9rem)] max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
+          <LogoMark size={28} />
           <div>
-            <p className="font-semibold text-sm leading-none">MacrAI</p>
+            <p className="font-head text-sm font-semibold leading-none">MacrAI</p>
             <p className="text-xs text-muted-foreground">Tu asistente de nutrición</p>
           </div>
         </div>

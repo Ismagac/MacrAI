@@ -86,7 +86,7 @@ export function FoodSearchCombobox({ onSelect, onSuggestedQuantity }: Props) {
                         : `${food.kcal_100g} kcal · ${food.proteinas_100g}g P · ${food.carbohidratos_100g}g C · ${food.grasas_100g}g G / 100g`}
                     </p>
                     {proposedQty && Number.isFinite(proposedQty) && proposedQty > 0 && (
-                      <p className="text-xs text-primary/90">
+                      <p className="text-xs text-brand">
                         {food.macros_basis === 'per_unit'
                           ? `Para ${proposedQty} ${food.unit_name || 'unidades'}: ${Math.round((food.kcal_per_unit ?? 0) * proposedQty)} kcal · ${Math.round((food.proteinas_per_unit ?? 0) * proposedQty * 10) / 10}g P · ${Math.round((food.carbohidratos_per_unit ?? 0) * proposedQty * 10) / 10}g C · ${Math.round((food.grasas_per_unit ?? 0) * proposedQty * 10) / 10}g G`
                           : `Para ${proposedQty}g: ${Math.round((food.kcal_100g * proposedQty) / 100)} kcal · ${Math.round((food.proteinas_100g * proposedQty) / 100 * 10) / 10}g P · ${Math.round((food.carbohidratos_100g * proposedQty) / 100 * 10) / 10}g C · ${Math.round((food.grasas_100g * proposedQty) / 100 * 10) / 10}g G`}

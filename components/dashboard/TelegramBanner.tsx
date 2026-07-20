@@ -167,7 +167,7 @@ export function TelegramBanner() {
               </div>
               <div className="bg-background rounded-lg border px-4 py-2 inline-block">
                 <p className="text-xs text-muted-foreground">{t('verificationCode')}</p>
-                <p className="text-2xl font-mono font-bold tracking-widest text-primary">
+                <p className="text-2xl font-mono font-bold tracking-widest text-brand">
                   {linkData.code}
                 </p>
               </div>
@@ -205,11 +205,11 @@ export function TelegramBanner() {
 
   // Default: offer to connect
   return (
-    <Card className="border-primary/30 bg-gradient-to-r from-primary/5 to-primary/10">
+    <Card className="border-primary/40">
       <CardContent className="pt-4 pb-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
           <div className="flex items-start gap-3 flex-1">
-            <Send className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+            <Send className="h-5 w-5 text-brand mt-0.5 shrink-0" />
             <div>
               <p className="font-semibold text-sm">{t('bannerTitle')}</p>
               <p className="text-xs text-muted-foreground mt-0.5">{t('bannerDesc')}</p>

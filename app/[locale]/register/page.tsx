@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Zap } from 'lucide-react'
+import { LogoMark } from '@/components/brand/Logo'
 
 const schema = z
   .object({
@@ -65,7 +65,7 @@ export default function RegisterPage() {
           <p className="text-sm text-muted-foreground">
             Te hemos enviado un enlace de confirmación.
           </p>
-          <Link href={`/${locale}/login`} className="mt-4 block text-sm text-primary underline-offset-4 hover:underline">
+          <Link href={`/${locale}/login`} className="mt-4 block text-sm text-brand underline-offset-4 hover:underline">
             Volver al login
           </Link>
         </Card>
@@ -78,7 +78,7 @@ export default function RegisterPage() {
       <div className="w-full max-w-sm space-y-6">
         <div className="flex flex-col items-center gap-2">
           <div className="flex items-center gap-2">
-            <Zap className="h-8 w-8 text-primary" />
+            <LogoMark size={34} />
             <span className="text-3xl font-bold tracking-tight">MacrAI</span>
           </div>
         </div>
@@ -87,7 +87,7 @@ export default function RegisterPage() {
             <CardTitle>{t('register')}</CardTitle>
             <CardDescription>
               {t('hasAccount')}{' '}
-              <Link href={`/${locale}/login`} className="text-primary underline-offset-4 hover:underline">
+              <Link href={`/${locale}/login`} className="text-brand underline-offset-4 hover:underline">
                 {t('login')}
               </Link>
             </CardDescription>

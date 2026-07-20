@@ -56,7 +56,7 @@ export function Sidebar() {
               <span
                 className={cn(
                   'inline-flex h-7 w-7 items-center justify-center rounded-lg transition-colors',
-                  isActive ? 'bg-primary/15 text-primary' : 'bg-muted/70 group-hover:bg-muted'
+                  isActive ? 'bg-primary/15 text-brand' : 'bg-muted/70 group-hover:bg-muted'
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" />

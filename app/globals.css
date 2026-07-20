@@ -22,6 +22,10 @@
     --primary: 76 94% 57%;
     --primary-foreground: 220 12% 5%;
 
+    /* El lima puro sobre blanco no llega a contraste: para texto e iconos
+       se usa esta versión oscurecida, que mantiene el tono de marca. */
+    --brand-ink: 76 100% 22%;
+
     --secondary: 60 12% 94%;
     --secondary-foreground: 220 12% 5%;
     --muted: 60 12% 94%;
@@ -55,6 +59,7 @@
 
     --primary: 76 94% 57%;
     --primary-foreground: 220 12% 5%;
+    --brand-ink: 76 94% 62%;
 
     --secondary: 220 13% 12%;
     --secondary-foreground: 80 8% 96%;
@@ -125,6 +130,10 @@
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
     @apply font-bold;
+  }
+
+  .text-brand {
+    color: hsl(var(--brand-ink));
   }
 
   .label-caps {

@@ -163,7 +163,7 @@ export default function PerfilPage() {
       <div className="max-w-2xl space-y-6">
         <h1 className="text-2xl font-bold">{t('title')}</h1>
 
-        <Card className="border-primary/20 shadow-lg shadow-primary/10">
+        <Card>
           <CardHeader>
             <CardTitle className="text-base">{t('appearanceTitle')}</CardTitle>
           </CardHeader>
@@ -204,7 +204,7 @@ export default function PerfilPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-primary" />
+              <KeyRound className="h-4 w-4 text-brand" />
               {t('aiTitle')}
             </CardTitle>
           </CardHeader>
@@ -212,7 +212,7 @@ export default function PerfilPage() {
             <p className="text-xs text-muted-foreground">{t('aiDescription')}</p>
 
             {llmConfigured && (
-              <p className="text-sm font-medium text-primary">
+              <p className="text-sm font-medium text-brand">
                 ✅ {t('aiConfigured', { provider: llmConfigured })}
               </p>
             )}
@@ -328,7 +328,7 @@ export default function PerfilPage() {
                   <p className="text-xs text-muted-foreground">{t('bmr')} (kcal)</p>
                 </div>
                 <div className="rounded-lg bg-primary/10 p-3 text-center">
-                  <p className="text-2xl font-bold text-primary">{tdee.tdee}</p>
+                  <p className="metric text-2xl text-brand">{tdee.tdee}</p>
                   <p className="text-xs text-muted-foreground">{t('tdee')} (kcal)</p>
                 </div>
               </div>

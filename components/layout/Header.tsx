@@ -30,7 +30,7 @@ export function Header() {
     <header className="sticky top-0 z-40 flex h-16 items-center gap-4 border-b border-border bg-background px-4 md:px-6">
       {/* Mobile logo */}
       <div className="md:hidden flex items-center gap-2">
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-primary">M</span>
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-brand">M</span>
         <span className="text-lg font-extrabold tracking-tight">MacrAI</span>
       </div>
 

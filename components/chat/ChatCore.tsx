@@ -50,7 +50,7 @@ function MacroCard({ macros }: { macros: NonNullable<AgentApiResponse['data']>['
     <div className="mt-2 rounded-xl border border-border bg-card p-3 text-sm space-y-2">
       <div className="flex items-center justify-between">
         <span className="font-semibold text-foreground">🔥 Calorías hoy</span>
-        <span className="font-bold text-primary">
+        <span className="font-bold text-brand">
           {macros.kcal} {obj?.kcal_objetivo ? `/ ${obj.kcal_objetivo}` : ''} kcal
         </span>
       </div>
@@ -643,7 +643,7 @@ export function ChatCore({ fullPage = false }: { fullPage?: boolean }) {
               {msg.role === 'assistant' && msg.action === 'need_details' && (
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="mt-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+                  className="mt-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-brand hover:bg-primary/20 transition-colors"
                 >
                   📷 Enviar foto de la etiqueta
                 </button>

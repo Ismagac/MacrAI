@@ -44,7 +44,7 @@ export function Logo({
           className="font-head font-bold tracking-tight leading-none"
           style={{ fontSize: size * 0.62 }}
         >
-          Macr<span className="text-primary">AI</span>
+          Macr<span className="text-brand">AI</span>
         </span>
       )}
     </div>

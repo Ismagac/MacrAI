@@ -1,84 +1,87 @@
 import { useTranslations } from 'next-intl'
-import { Card, CardContent } from '@/components/ui/card'
 import type { MacrosSummary, Objetivo } from '@/types'
 import { cn } from '@/lib/utils/cn'
-import { Beef, Wheat, Droplets, Leaf } from 'lucide-react'
 
 interface Props {
   macros: MacrosSummary
   objetivo: Objetivo | null
 }
 
-function MacroCard({
+function MacroTile({
   label,
   value,
   goal,
-  color,
-  icon,
+  barClass,
+  textClass,
   unit = 'g',
 }: {
   label: string
   value: number
   goal?: number
-  color: string
-  icon: React.ReactNode
+  barClass: string
+  textClass: string
   unit?: string
 }) {
   const pct = goal ? Math.min(Math.round((value / goal) * 100), 100) : null
+  const over = goal ? value > goal : false
+
   return (
-    <Card className="relative overflow-hidden border-primary/10">
-      <div className={cn('absolute inset-x-0 top-0 h-1', color)} />
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between">
-          <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-muted/70 text-muted-foreground">
-            {icon}
-          </span>
-        </div>
-        <p className="text-2xl font-extrabold mt-2">
-          {Math.round(value * 10) / 10}
-          <span className="text-sm font-normal text-muted-foreground ml-1">{unit}</span>
-        </p>
-        {goal && (
-          <p className="text-xs text-muted-foreground mt-1 font-medium">
-            {pct}% {goal}{unit}
+    <div className="surface-card p-3">
+      <p className="label-caps">{label}</p>
+      <p className="metric mt-1 text-2xl">
+        <span className={textClass}>{Math.round(value * 10) / 10}</span>
+        <span className="ml-0.5 text-sm font-normal text-muted-foreground">{unit}</span>
+      </p>
+      {goal ? (
+        <>
+          <div className="macro-track mt-2 h-1.5 w-full rounded-full">
+            <div
+              className={cn('h-1.5 rounded-full', over ? 'bg-destructive' : barClass)}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {pct}% · {goal}
+            {unit}
           </p>
-        )}
-      </CardContent>
-    </Card>
+        </>
+      ) : (
+        <p className="mt-1 text-[11px] text-muted-foreground">—</p>
+      )}
+    </div>
   )
 }
 
 export function MacroSummaryCards({ macros, objetivo }: Props) {
   const t = useTranslations('dashboard')
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      <MacroCard
+    <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+      <MacroTile
         label={t('protein')}
         value={macros.proteinas}
         goal={objetivo?.proteinas_objetivo}
-        color="macro-bg-protein"
-        icon={<Beef className="h-4 w-4" />}
+        barClass="macro-bg-protein"
+        textClass="macro-protein"
       />
-      <MacroCard
+      <MacroTile
         label={t('carbs')}
         value={macros.carbohidratos}
         goal={objetivo?.carbohidratos_objetivo}
-        color="macro-bg-carbs"
-        icon={<Wheat className="h-4 w-4" />}
+        barClass="macro-bg-carbs"
+        textClass="macro-carbs"
       />
-      <MacroCard
+      <MacroTile
         label={t('fat')}
         value={macros.grasas}
         goal={objetivo?.grasas_objetivo}
-        color="macro-bg-fat"
-        icon={<Droplets className="h-4 w-4" />}
+        barClass="macro-bg-fat"
+        textClass="macro-fat"
       />
-      <MacroCard
+      <MacroTile
         label={t('fiber')}
         value={macros.fibra}
-        color="macro-bg-fiber"
-        icon={<Leaf className="h-4 w-4" />}
+        barClass="macro-bg-fiber"
+        textClass="macro-fiber"
       />
     </div>
   )

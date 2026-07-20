@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Zap } from 'lucide-react'
+import { LogoMark } from '@/components/brand/Logo'
 
 const schema = z.object({
   email: z.string().email(),
@@ -54,7 +54,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm space-y-6">
         <div className="flex flex-col items-center gap-2">
           <div className="flex items-center gap-2">
-            <Zap className="h-8 w-8 text-primary" />
+            <LogoMark size={34} />
             <span className="text-3xl font-bold tracking-tight">MacrAI</span>
           </div>
           <p className="text-sm text-muted-foreground text-center">
@@ -67,7 +67,7 @@ export default function LoginPage() {
             <CardTitle>{t('login')}</CardTitle>
             <CardDescription>
               {t('noAccount')}{' '}
-              <Link href={`/${locale}/register`} className="text-primary underline-offset-4 hover:underline">
+              <Link href={`/${locale}/register`} className="text-brand underline-offset-4 hover:underline">
                 {t('register')}
               </Link>
             </CardDescription>

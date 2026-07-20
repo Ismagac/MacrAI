@@ -56,10 +56,10 @@ export function DailyLogTable({ consumos, groupingMode, onDelete, onUpdateCantid
       {groups.map((group) => {
         const isCollapsed = collapsed.has(group.key)
         return (
-          <div key={group.key} className="rounded-2xl border border-border/75 bg-card/75 backdrop-blur-sm overflow-hidden shadow-[0_16px_36px_-26px_hsl(var(--foreground)/0.35)]">
+          <div key={group.key} className="surface-card overflow-hidden">
             {/* Group header */}
             <button
-              className="w-full flex items-center justify-between px-4 py-3.5 bg-muted/35 hover:bg-muted/60 transition-colors text-left"
+              className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-accent/40 transition-colors text-left border-b border-border"
               onClick={() => toggleGroup(group.key)}
             >
               <div>
@@ -88,7 +88,7 @@ export function DailyLogTable({ consumos, groupingMode, onDelete, onUpdateCantid
                   return (
                   <div
                     key={consumo.id}
-                    className="flex items-center gap-3 px-4 py-3 hover:bg-accent/30 transition-colors"
+                    className="flex items-center gap-3 px-3 py-2.5 hover:bg-accent/30 transition-colors"
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{consumo.nombre_alimento}</p>
