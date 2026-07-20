@@ -565,8 +565,11 @@ export async function generateAgentReply(
   const systemPrompt =
     `Eres MacrAI, el asistente personal de nutrición integrado en la app.\n` +
     `Eres conciso, motivador y directo. Responde siempre en español. Máximo 3 frases.\n` +
-    `No expliques lo que vas a hacer, hazlo. Usa los datos del contexto cuando sean relevantes.\n` +
-    (context ? `\n[Datos del usuario]\n${context}\n` : "");
+    `No expliques lo que vas a hacer, hazlo.\n` +
+    `REGLA CRÍTICA: sobre el catálogo, el diario o los macros del usuario, usa EXCLUSIVAMENTE ` +
+    `los datos del contexto. Nunca afirmes que algo está vacío si el contexto no lo dice. ` +
+    `Si el contexto no trae el dato, di que no lo tienes a mano.\n` +
+    (context ? `\n[Datos reales del usuario]\n${context}\n` : "");
 
   try {
     return await llmChat({

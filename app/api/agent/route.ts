@@ -78,6 +78,9 @@ type CatalogRow = {
   macros_basis?: string | null
 }
 
+// Fila completa del catálogo tal y como vive en la tabla.
+type CatalogFood = CatalogRow & Record<string, unknown>
+
 // El usuario escribe "pollo" y en el catálogo está "Pechuga de pollo": se busca
 // primero coincidencia exacta y se cae a coincidencia por inclusión.
 function findCatalogMatch<T extends CatalogRow>(catalog: T[], name: string): T | undefined {
@@ -143,16 +146,22 @@ export async function POST(request: NextRequest) {
 
   // El catálogo personal viaja al parser: así reconoce los alimentos del usuario
   // por su nombre real en vez de tratarlos como texto libre.
-  const { data: catalogRows } = await supabase
+  // Se piden todas las columnas: los nombres per-unit se renombraron en una
+  // migración condicional y pedirlos explícitamente rompe la consulta entera
+  // en bases donde el renombrado no llegó a aplicarse.
+  const { data: catalogRows, error: catalogError } = await supabase
     .from('alimentos_usuario')
-    .select(
-      'id, nombre, kcal_100g, proteinas_100g, grasas_100g, carbohidratos_100g, fibra_100g, macros_basis, unit_name, kcal_per_unit, proteinas_per_unit, grasas_per_unit, carbohidratos_per_unit'
-    )
+    .select('*')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(100)
 
-  const userCatalog = catalogRows ?? []
+  if (catalogError) {
+    // Silenciar esto hacía que un fallo de lectura se contase como "catálogo vacío".
+    console.error('No se pudo leer el catálogo del usuario:', catalogError.message)
+  }
+
+  const userCatalog = (catalogRows ?? []) as CatalogFood[]
   const catalogNames = userCatalog.map((f) => f.nombre)
 
   const intent = await parseUserIntent(message, userKey, catalogNames)
@@ -243,7 +252,11 @@ export async function POST(request: NextRequest) {
   // ── catalog ──
   else if (intent.type === 'catalog') {
     const catalog = userCatalog.slice(0, 20).map((f) => ({ ...f, source: 'usuario' })) as FoodOptionItem[]
-    context = `Catálogo personal (${catalog.length} alimentos): ${catalog.map((f) => f.nombre).join(', ')}`
+    context = catalogError
+      ? 'No he podido leer el catálogo por un error de base de datos. Dilo claramente, sin afirmar que esté vacío.'
+      : catalog.length === 0
+        ? 'El catálogo personal del usuario está vacío de verdad.'
+        : `Catálogo personal (${userCatalog.length} alimentos): ${catalog.map((f) => f.nombre).join(', ')}`
     actionType = 'catalog_data'
     actionData = { catalog }
   }
@@ -252,19 +265,18 @@ export async function POST(request: NextRequest) {
   else if (intent.type === 'log_food') {
     const query = intent.query
 
-    const [dbResult, offFoods] = await Promise.all([
-      supabase
-        .from('alimentos_usuario')
-        .select(
-          'id, nombre, kcal_100g, proteinas_100g, grasas_100g, carbohidratos_100g, fibra_100g, macros_basis, unit_name, kcal_per_unit, proteinas_per_unit, grasas_per_unit, carbohidratos_per_unit'
-        )
-        .eq('user_id', user.id)
-        .ilike('nombre', `%${query}%`)
-        .limit(5),
-      searchOpenFoodFacts(query, 5),
-    ])
+    // El catálogo ya está en memoria: se filtra aquí en vez de volver a consultar.
+    const needle = query.trim().toLowerCase()
+    const userFoods: FoodOptionItem[] = userCatalog
+      .filter((f) => {
+        const name = String(f.nombre).toLowerCase()
+        return name.includes(needle) || needle.includes(name)
+      })
+      .slice(0, 5)
+      .map((f) => ({ ...f, source: 'usuario' })) as FoodOptionItem[]
 
-    const userFoods: FoodOptionItem[] = (dbResult.data ?? []).map((f) => ({ ...f, source: 'usuario' }))
+    // Sólo se sale a buscar fuera si el usuario no lo tiene ya fichado.
+    const offFoods = userFoods.length > 0 ? [] : await searchOpenFoodFacts(query, 5)
     const globalFoods: FoodOptionItem[] = offFoods.map((f: FoodItem) => ({
       id: f.id,
       nombre: f.nombre,
@@ -461,8 +473,19 @@ export async function POST(request: NextRequest) {
     actionData = undefined
   }
 
-  // Generate conversational reply
-  const reply = await generateAgentReply(message, context, safeHistory, userKey)
+  // Sin esto, una pregunta clasificada como charla general llega al modelo sin
+  // datos y termina inventándose el estado del usuario (p. ej. "tu catálogo está vacío").
+  const baseContext = catalogError
+    ? 'No se ha podido leer el catálogo del usuario en esta petición.'
+    : userCatalog.length > 0
+      ? `El usuario tiene ${userCatalog.length} alimentos en su catálogo personal: ` +
+        `${userCatalog.slice(0, 30).map((f) => f.nombre).join(', ')}` +
+        `${userCatalog.length > 30 ? ', …' : ''}.`
+      : 'El catálogo personal del usuario está vacío.'
+
+  const fullContext = [baseContext, context].filter(Boolean).join('\n')
+
+  const reply = await generateAgentReply(message, fullContext, safeHistory, userKey)
 
   const response: AgentApiResponse = {
     reply,
