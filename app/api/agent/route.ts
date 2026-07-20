@@ -48,7 +48,15 @@ type HistoryDayData = {
 
 export type AgentApiResponse = {
   reply: string
-  action?: 'food_options' | 'macros_data' | 'history_data' | 'catalog_data' | 'food_saved' | 'need_details'
+  action?:
+    | 'food_options'
+    | 'macros_data'
+    | 'history_data'
+    | 'catalog_data'
+    | 'food_saved'
+    | 'need_details'
+    | 'catalog_changed'
+    | 'log_changed'
   data?: {
     foods?: FoodOptionItem[]
     qty?: number
@@ -59,6 +67,47 @@ export type AgentApiResponse = {
     catalog?: FoodOptionItem[]
     savedFood?: { nombre: string; kcal: number; basis: string; unitName?: string }
   }
+}
+
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+type CatalogRow = {
+  id: string
+  nombre: string
+  macros_basis?: string | null
+}
+
+// El usuario escribe "pollo" y en el catálogo está "Pechuga de pollo": se busca
+// primero coincidencia exacta y se cae a coincidencia por inclusión.
+function findCatalogMatch<T extends CatalogRow>(catalog: T[], name: string): T | undefined {
+  const needle = name.trim().toLowerCase()
+  if (!needle) return undefined
+
+  return (
+    catalog.find((f) => f.nombre.toLowerCase() === needle) ??
+    catalog.find((f) => f.nombre.toLowerCase().includes(needle)) ??
+    catalog.find((f) => needle.includes(f.nombre.toLowerCase()))
+  )
+}
+
+const PATCH_LABELS: Record<string, string> = {
+  nombre: 'nombre',
+  kcal_100g: 'kcal',
+  kcal_per_unit: 'kcal',
+  proteinas_100g: 'proteínas',
+  proteinas_per_unit: 'proteínas',
+  carbohidratos_100g: 'carbohidratos',
+  carbohidratos_per_unit: 'carbohidratos',
+  grasas_100g: 'grasas',
+  grasas_per_unit: 'grasas',
+  fibra_100g: 'fibra',
+}
+
+function describePatch(patch: Record<string, unknown>): string {
+  return Object.entries(patch)
+    .map(([key, value]) => `${PATCH_LABELS[key] ?? key} = ${value}`)
+    .join(', ')
 }
 
 // ─── Route handler ─────────────────────────────────────────────────────────────
@@ -92,8 +141,21 @@ export async function POST(request: NextRequest) {
 
   const userKey = await getUserLlmKey(supabase, user.id)
 
-  // Parse intent
-  const intent = await parseUserIntent(message, userKey)
+  // El catálogo personal viaja al parser: así reconoce los alimentos del usuario
+  // por su nombre real en vez de tratarlos como texto libre.
+  const { data: catalogRows } = await supabase
+    .from('alimentos_usuario')
+    .select(
+      'id, nombre, kcal_100g, proteinas_100g, grasas_100g, carbohidratos_100g, fibra_100g, macros_basis, unit_name, kcal_per_unit, proteinas_per_unit, grasas_per_unit, carbohidratos_per_unit'
+    )
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(100)
+
+  const userCatalog = catalogRows ?? []
+  const catalogNames = userCatalog.map((f) => f.nombre)
+
+  const intent = await parseUserIntent(message, userKey, catalogNames)
 
   let context = ''
   let actionType: AgentApiResponse['action']
@@ -180,16 +242,7 @@ export async function POST(request: NextRequest) {
 
   // ── catalog ──
   else if (intent.type === 'catalog') {
-    const { data: foods } = await supabase
-      .from('alimentos_usuario')
-      .select(
-        'id, nombre, kcal_100g, proteinas_100g, grasas_100g, carbohidratos_100g, fibra_100g, macros_basis, unit_name, kcal_per_unit, proteinas_per_unit, grasas_per_unit, carbohidratos_per_unit'
-      )
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(20)
-
-    const catalog = (foods ?? []).map((f) => ({ ...f, source: 'usuario' })) as FoodOptionItem[]
+    const catalog = userCatalog.slice(0, 20).map((f) => ({ ...f, source: 'usuario' })) as FoodOptionItem[]
     context = `Catálogo personal (${catalog.length} alimentos): ${catalog.map((f) => f.nombre).join(', ')}`
     actionType = 'catalog_data'
     actionData = { catalog }
@@ -283,6 +336,121 @@ export async function POST(request: NextRequest) {
           unitName: intent.unit_name,
         },
       }
+    }
+  }
+
+  // ── update_catalog_food ──
+  else if (intent.type === 'update_catalog_food') {
+    const target = findCatalogMatch(userCatalog, intent.nombre)
+
+    if (!target) {
+      context = `El usuario quiere corregir "${intent.nombre}" pero no está en su catálogo. Díselo y ofrécele crearlo.`
+    } else {
+      const isPerUnit = target.macros_basis === 'per_unit'
+      const patch: Record<string, unknown> = {}
+      if (intent.nuevo_nombre) patch.nombre = intent.nuevo_nombre
+      if (intent.kcal !== undefined) patch[isPerUnit ? 'kcal_per_unit' : 'kcal_100g'] = intent.kcal
+      if (intent.proteinas !== undefined) patch[isPerUnit ? 'proteinas_per_unit' : 'proteinas_100g'] = intent.proteinas
+      if (intent.carbohidratos !== undefined) patch[isPerUnit ? 'carbohidratos_per_unit' : 'carbohidratos_100g'] = intent.carbohidratos
+      if (intent.grasas !== undefined) patch[isPerUnit ? 'grasas_per_unit' : 'grasas_100g'] = intent.grasas
+      if (intent.fibra !== undefined) patch.fibra_100g = intent.fibra
+
+      if (Object.keys(patch).length === 0) {
+        context = `El usuario quiere cambiar "${target.nombre}" pero no dijo qué valor. Pregúntaselo en una frase.`
+      } else {
+        const { error } = await supabase
+          .from('alimentos_usuario')
+          .update(patch)
+          .eq('id', target.id)
+          .eq('user_id', user.id)
+
+        context = error
+          ? `Fallo al actualizar "${target.nombre}". Discúlpate brevemente.`
+          : `Actualizado "${target.nombre}" en el catálogo: ${describePatch(patch)}. Confírmaselo en una frase.`
+        if (!error) actionType = 'catalog_changed'
+      }
+    }
+  }
+
+  // ── delete_catalog_food ──
+  else if (intent.type === 'delete_catalog_food') {
+    const target = findCatalogMatch(userCatalog, intent.nombre)
+
+    if (!target) {
+      context = `El usuario quiere borrar "${intent.nombre}" del catálogo pero no lo encuentro. Díselo.`
+    } else {
+      const { error } = await supabase
+        .from('alimentos_usuario')
+        .delete()
+        .eq('id', target.id)
+        .eq('user_id', user.id)
+
+      context = error
+        ? `No pude borrar "${target.nombre}". Discúlpate brevemente.`
+        : `Borrado "${target.nombre}" del catálogo del usuario. Confírmaselo en una frase.`
+      if (!error) actionType = 'catalog_changed'
+    }
+  }
+
+  // ── delete_log ──
+  else if (intent.type === 'delete_log') {
+    let q = supabase.from('consumos').select('id, nombre_alimento, kcal').eq('user_id', user.id).eq('fecha', today)
+    if (intent.mealType) q = q.eq('tipo_comida', intent.mealType)
+    if (intent.query) q = q.ilike('nombre_alimento', `%${intent.query}%`)
+
+    const { data: matches } = await q.order('created_at', { ascending: false })
+
+    if (!matches || matches.length === 0) {
+      context = 'No encontré ese registro en el diario de hoy. Díselo al usuario en una frase.'
+    } else {
+      const victim = matches[0]
+      const { error } = await supabase.from('consumos').delete().eq('id', victim.id).eq('user_id', user.id)
+
+      context = error
+        ? `No pude borrar "${victim.nombre_alimento}" del diario. Discúlpate brevemente.`
+        : `Borrado del diario de hoy: "${victim.nombre_alimento}" (${Math.round(victim.kcal ?? 0)} kcal).` +
+          (matches.length > 1 ? ` Había ${matches.length} coincidencias, borré la más reciente.` : '') +
+          ' Confírmaselo en una frase.'
+      if (!error) actionType = 'log_changed'
+    }
+  }
+
+  // ── update_log ──
+  else if (intent.type === 'update_log') {
+    const { data: matches } = await supabase
+      .from('consumos')
+      .select('id, nombre_alimento, cantidad_gr, kcal, proteinas, grasas, carbohidratos, fibra, macros_basis')
+      .eq('user_id', user.id)
+      .eq('fecha', today)
+      .ilike('nombre_alimento', `%${intent.query}%`)
+      .order('created_at', { ascending: false })
+
+    const target = matches?.[0]
+    if (!target) {
+      context = `No encontré "${intent.query}" en el diario de hoy. Díselo al usuario.`
+    } else {
+      // Las macros guardadas corresponden a la cantidad antigua: se reescalan.
+      const oldQty = Number(target.cantidad_gr) || 0
+      const factor = oldQty > 0 ? intent.qty / oldQty : 1
+      const round1 = (n: number) => Math.round((n ?? 0) * factor * 10) / 10
+
+      const { error } = await supabase
+        .from('consumos')
+        .update({
+          cantidad_gr: intent.qty,
+          kcal: Math.round((target.kcal ?? 0) * factor),
+          proteinas: round1(target.proteinas),
+          grasas: round1(target.grasas),
+          carbohidratos: round1(target.carbohidratos),
+          fibra: round1(target.fibra),
+        })
+        .eq('id', target.id)
+        .eq('user_id', user.id)
+
+      context = error
+        ? `No pude actualizar "${target.nombre_alimento}". Discúlpate brevemente.`
+        : `Actualizado "${target.nombre_alimento}" de ${oldQty} a ${intent.qty}. Confírmaselo en una frase.`
+      if (!error) actionType = 'log_changed'
     }
   }
 

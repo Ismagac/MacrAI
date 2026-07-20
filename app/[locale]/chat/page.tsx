@@ -1,22 +1,27 @@
 'use client'
 
-import { AppLayout } from '@/components/layout/AppLayout'
+import { Sidebar } from '@/components/layout/Sidebar'
+import { MobileNav } from '@/components/layout/MobileNav'
 import { ChatCore } from '@/components/chat/ChatCore'
 import { LogoMark } from '@/components/brand/Logo'
 
+// El chat no usa AppLayout: ocupa la altura completa sin cabecera ni padding,
+// para que la conversación se lea como en cualquier asistente serio.
 export default function ChatPage() {
   return (
-    <AppLayout>
-      <div className="mx-auto flex h-[calc(100vh-11rem)] md:h-[calc(100vh-9rem)] max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-card">
-        <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
-          <LogoMark size={28} />
-          <div>
-            <p className="font-head text-sm font-semibold leading-none">MacrAI</p>
-            <p className="text-xs text-muted-foreground">Tu asistente de nutrición</p>
-          </div>
-        </div>
+    <div className="flex h-screen overflow-hidden">
+      <Sidebar />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center gap-2.5 border-b border-border px-4 py-3 md:hidden">
+          <LogoMark size={26} />
+          <span className="font-head text-base font-semibold">MacrAI</span>
+        </header>
+
         <ChatCore fullPage />
+
+        <div className="h-16 shrink-0 md:hidden" />
+        <MobileNav />
       </div>
-    </AppLayout>
+    </div>
   )
 }

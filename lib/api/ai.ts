@@ -342,37 +342,62 @@ export type UserIntent =
       grasas: number;
       fibra?: number;
     }
+  | {
+      type: "update_catalog_food";
+      nombre: string;
+      kcal?: number;
+      proteinas?: number;
+      carbohidratos?: number;
+      grasas?: number;
+      fibra?: number;
+      nuevo_nombre?: string;
+    }
+  | { type: "delete_catalog_food"; nombre: string }
+  | { type: "delete_log"; query?: string; mealType?: string }
+  | { type: "update_log"; query: string; qty: number }
   | { type: "check_macros" }
   | { type: "history" }
   | { type: "catalog" }
   | { type: "edit_log" }
   | { type: "chat"; reply: string };
 
-const INTENT_SYSTEM_PROMPT = `Eres MacrAI. Clasifica el mensaje del usuario. Devuelve SOLO JSON válido.
+function buildIntentPrompt(catalogNames: string[]): string {
+  const catalogBlock =
+    catalogNames.length > 0
+      ? `\nAlimentos que el usuario YA tiene en su catálogo personal:\n${catalogNames.map((n) => `- ${n}`).join("\n")}\nSi el mensaje se refiere a uno de estos, usa su nombre exacto en "query" o "nombre".\n`
+      : "";
+
+  return `Eres MacrAI. Clasifica el mensaje del usuario. Devuelve SOLO JSON válido.
 Tipos válidos:
-- "log_food": registrar un alimento. Campos: query (string), qty (número en gramos, opcional), mealType (desayuno|almuerzo|comida|merienda|cena|snack|otro, opcional)
-- "add_catalog_food": añadir alimento al catálogo con macros completos. Campos: nombre, macros_basis("per_100g"|"per_unit"), unit_name(opcional), kcal, proteinas, carbohidratos, grasas, fibra(opcional)
+- "log_food": registrar un alimento en el diario. Campos: query (string), qty (número, opcional), mealType (desayuno|almuerzo|comida|merienda|cena|snack|otro, opcional)
+- "add_catalog_food": crear alimento nuevo en el catálogo con macros completos. Campos: nombre, macros_basis("per_100g"|"per_unit"), unit_name(opcional), kcal, proteinas, carbohidratos, grasas, fibra(opcional)
+- "update_catalog_food": corregir macros o nombre de un alimento YA existente en el catálogo. Campos: nombre (el actual), y los que cambien: kcal, proteinas, carbohidratos, grasas, fibra, nuevo_nombre
+- "delete_catalog_food": eliminar un alimento del catálogo. Campo: nombre
+- "delete_log": borrar un registro del diario de hoy. Campos: query (nombre del alimento, opcional), mealType (opcional)
+- "update_log": cambiar la cantidad de un registro de hoy. Campos: query (nombre), qty (nueva cantidad)
 - "check_macros": ver macros/calorías de hoy
 - "history": ver historial semanal
 - "catalog": ver catálogo personal de alimentos
-- "edit_log": corregir, editar o borrar un registro del diario
 - "chat": conversación general. Campo: reply (respuesta corta y amigable en español, máximo 2 frases)
-
+${catalogBlock}
 Ejemplos:
 "añade 150 tortitas de maiz" → {"type":"log_food","query":"tortitas de maiz","qty":150}
 "ponme 200g de pollo en la comida" → {"type":"log_food","query":"pollo","qty":200,"mealType":"comida"}
-"registra desayuno: 2 huevos" → {"type":"log_food","query":"huevos","qty":2,"mealType":"desayuno"}
 "añade un café frío light hacendado, por cada 250ml 160 kcal, 3.3 grasas, 23.3 hidratos, 8 proteínas" → {"type":"add_catalog_food","nombre":"Café frío light hacendado","macros_basis":"per_unit","unit_name":"250ml","kcal":160,"proteinas":8,"carbohidratos":23.3,"grasas":3.3}
-"guarda pechuga de pollo al catálogo: por 100g 120 kcal, 2 grasas, 0 hidratos, 24 proteínas" → {"type":"add_catalog_food","nombre":"Pechuga de pollo","macros_basis":"per_100g","kcal":120,"proteinas":24,"carbohidratos":0,"grasas":2}
+"corrige el pollo, son 24 de proteína no 20" → {"type":"update_catalog_food","nombre":"pollo","proteinas":24}
+"cambia las kcal del yogur griego a 130" → {"type":"update_catalog_food","nombre":"yogur griego","kcal":130}
+"renombra pollo a pechuga de pollo" → {"type":"update_catalog_food","nombre":"pollo","nuevo_nombre":"Pechuga de pollo"}
+"elimina el café del catálogo" → {"type":"delete_catalog_food","nombre":"café"}
+"borra el yogur de hoy" → {"type":"delete_log","query":"yogur"}
+"quita lo que registré en la cena" → {"type":"delete_log","mealType":"cena"}
+"el arroz eran 200g no 100" → {"type":"update_log","query":"arroz","qty":200}
 "¿cuánto llevo hoy?" → {"type":"check_macros"}
-"mis macros" → {"type":"check_macros"}
 "historial semanal" → {"type":"history"}
 "mi catálogo" → {"type":"catalog"}
-"borra el yogur de esta mañana" → {"type":"edit_log"}
-"hola" → {"type":"chat","reply":"¡Hola! ¿Qué quieres registrar hoy? 💪"}
-"gracias" → {"type":"chat","reply":"¡De nada! Aquí estoy para lo que necesites. 😊"}
+"hola" → {"type":"chat","reply":"¡Hola! ¿Qué te apunto hoy?"}
 
 Mensaje del usuario: `;
+}
 
 function heuristicParseCatalogFood(text: string): UserIntent | null {
   const lower = text.toLowerCase();
@@ -421,15 +446,19 @@ function heuristicParseCatalogFood(text: string): UserIntent | null {
   };
 }
 
-export async function parseUserIntent(text: string, userKey?: UserLlmKey | null): Promise<UserIntent> {
+export async function parseUserIntent(
+  text: string,
+  userKey?: UserLlmKey | null,
+  catalogNames: string[] = []
+): Promise<UserIntent> {
   try {
     const raw = await llmChat({
       task: "text",
       temperature: 0.1,
-      maxTokens: 150,
+      maxTokens: 180,
       timeoutMs: 6000,
       userKey,
-      messages: [{ role: "user", content: INTENT_SYSTEM_PROMPT + JSON.stringify(text) }],
+      messages: [{ role: "user", content: buildIntentPrompt(catalogNames) + JSON.stringify(text) }],
     });
 
     const jsonStr = extractJsonObject(raw);
@@ -451,6 +480,38 @@ export async function parseUserIntent(text: string, userKey?: UserLlmKey | null)
           qty: coerceNumber(obj.qty),
           mealType: typeof obj.mealType === "string" ? obj.mealType : undefined,
         };
+      }
+
+      if (type === "update_catalog_food" && typeof obj.nombre === "string") {
+        return {
+          type: "update_catalog_food",
+          nombre: obj.nombre,
+          kcal: coerceNumber(obj.kcal),
+          proteinas: coerceNumber(obj.proteinas),
+          carbohidratos: coerceNumber(obj.carbohidratos),
+          grasas: coerceNumber(obj.grasas),
+          fibra: coerceNumber(obj.fibra),
+          nuevo_nombre: typeof obj.nuevo_nombre === "string" ? obj.nuevo_nombre : undefined,
+        };
+      }
+
+      if (type === "delete_catalog_food" && typeof obj.nombre === "string") {
+        return { type: "delete_catalog_food", nombre: obj.nombre };
+      }
+
+      if (type === "delete_log") {
+        return {
+          type: "delete_log",
+          query: typeof obj.query === "string" ? obj.query : undefined,
+          mealType: typeof obj.mealType === "string" ? obj.mealType : undefined,
+        };
+      }
+
+      if (type === "update_log") {
+        const qty = coerceNumber(obj.qty);
+        if (typeof obj.query === "string" && qty !== undefined) {
+          return { type: "update_log", query: obj.query, qty };
+        }
       }
 
       if (type === "add_catalog_food") {

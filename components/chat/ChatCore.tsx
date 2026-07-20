@@ -1,30 +1,26 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { calcMacros, calcMacrosFromGrams } from '@/lib/utils/macros'
+import { Camera, Mic, AudioLines, ArrowUp, Square, X, Paperclip } from 'lucide-react'
+import { LogoMark } from '@/components/brand/Logo'
+import { cn } from '@/lib/utils/cn'
+import { useSpeech } from './useSpeech'
+import {
+  MacroCard,
+  HistoryCard,
+  CatalogCard,
+  FoodOptionsCard,
+  DetectedFoodCard,
+  type FoodOption,
+} from './ChatCards'
 import type { AgentApiResponse } from '@/app/api/agent/route'
 import type { MacroDetectionResult } from '@/lib/api/ai'
-import type { FoodItem, MealType } from '@/types'
-
-// ─── Types ─────────────────────────────────────────────────────────────────────
 
 type AgentHistory = { role: 'user' | 'assistant'; content: string }
 
-type FoodOption = {
-  id: string
-  nombre: string
-  kcal_100g: number
-  proteinas_100g: number
-  grasas_100g: number
-  carbohidratos_100g: number
-  fibra_100g?: number
-  source: string
-}
-
 type ChatMessage =
-  | { id: string; role: 'user'; content: string }
+  | { id: string; role: 'user'; content: string; image?: string }
   | {
       id: string
       role: 'assistant'
@@ -34,424 +30,26 @@ type ChatMessage =
       detected?: MacroDetectionResult
     }
 
-const MEAL_OPTIONS: MealType[] = ['desayuno', 'almuerzo', 'comida', 'merienda', 'cena', 'snack', 'otro']
+const SUGGESTIONS = [
+  '150 g de pollo a la comida',
+  '¿Cuánto llevo hoy?',
+  'Añade un yogur griego a mi catálogo',
+  'Borra el café de esta mañana',
+]
 
-// ─── Cards ─────────────────────────────────────────────────────────────────────
-
-function MacroCard({ macros }: { macros: NonNullable<AgentApiResponse['data']>['macros'] }) {
-  if (!macros) return null
-  const obj = macros.objetivo
-  const pct = (val: number, goal?: number | null) =>
-    goal && goal > 0 ? Math.min(Math.round((val / goal) * 100), 100) : null
-
-  const kcalPct = pct(macros.kcal, obj?.kcal_objetivo)
-
-  return (
-    <div className="mt-2 rounded-xl border border-border bg-card p-3 text-sm space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="font-semibold text-foreground">🔥 Calorías hoy</span>
-        <span className="font-bold text-brand">
-          {macros.kcal} {obj?.kcal_objetivo ? `/ ${obj.kcal_objetivo}` : ''} kcal
-        </span>
-      </div>
-      {kcalPct !== null && (
-        <div className="w-full bg-muted rounded-full h-1.5">
-          <div
-            className="bg-primary h-1.5 rounded-full transition-all"
-            style={{ width: `${kcalPct}%` }}
-          />
-        </div>
-      )}
-      <div className="grid grid-cols-3 gap-1 text-xs text-muted-foreground pt-1">
-        <div>🥩 P: <span className="text-foreground font-medium">{macros.proteinas}g</span></div>
-        <div>🍞 C: <span className="text-foreground font-medium">{macros.carbohidratos}g</span></div>
-        <div>🧈 G: <span className="text-foreground font-medium">{macros.grasas}g</span></div>
-      </div>
-    </div>
-  )
-}
-
-function HistoryCard({ days }: { days: NonNullable<AgentApiResponse['data']>['days'] }) {
-  if (!days || days.length === 0) return null
-  return (
-    <div className="mt-2 rounded-xl border border-border bg-card p-3 text-xs space-y-1">
-      {days.map((d) => {
-        const date = new Date(d.fecha + 'T12:00:00')
-        const label = date.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })
-        return (
-          <div key={d.fecha} className="flex justify-between items-center py-0.5 border-b border-border/40 last:border-0">
-            <span className="text-muted-foreground capitalize">{label}</span>
-            <span className="font-semibold text-foreground">{d.kcal} kcal</span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function CatalogCard({ catalog }: { catalog: NonNullable<AgentApiResponse['data']>['catalog'] }) {
-  if (!catalog || catalog.length === 0) return null
-  return (
-    <div className="mt-2 rounded-xl border border-border bg-card p-3 text-xs space-y-1">
-      {catalog.map((f) => (
-        <div key={f.id} className="flex justify-between items-center py-0.5 border-b border-border/40 last:border-0">
-          <span className="font-medium text-foreground truncate max-w-[120px]">{f.nombre}</span>
-          <span className="text-muted-foreground shrink-0">{f.kcal_100g} kcal</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function FoodOptionsCard({
-  foods,
-  defaultQty,
-  defaultMealType,
-  onLogged,
-}: {
-  foods: FoodOption[]
-  defaultQty?: number
-  defaultMealType?: string
-  onLogged: () => void
-}) {
-  const [selected, setSelected] = useState<FoodOption | null>(null)
-  const [qty, setQty] = useState(String(defaultQty ?? 100))
-  const [mealType, setMealType] = useState<MealType>((defaultMealType as MealType) ?? 'otro')
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-
-  const macroPreview = selected
-    ? calcMacrosFromGrams(
-        { ...selected, source: selected.source as never, macros_basis: 'per_100g' },
-        Number(qty) || 0
-      )
-    : null
-
-  async function handleConfirm() {
-    if (!selected || !qty) return
-    setSaving(true)
-    try {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const m = calcMacrosFromGrams(
-        { ...selected, source: selected.source as never, macros_basis: 'per_100g' },
-        Number(qty)
-      )
-      const today = new Date().toISOString().split('T')[0]
-
-      const { error } = await supabase.from('consumos').insert({
-        user_id: user.id,
-        alimento_source: selected.source,
-        nombre_alimento: selected.nombre,
-        cantidad_gr: Number(qty),
-        macros_basis: 'per_100g',
-        kcal: m.kcal,
-        proteinas: m.proteinas,
-        grasas: m.grasas,
-        carbohidratos: m.carbohidratos,
-        fibra: m.fibra,
-        fecha: today,
-        tipo_comida: mealType,
-        numero_comida: 1,
-      })
-
-      if (!error) {
-        setSaved(true)
-        onLogged()
-      }
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (saved) {
-    return (
-      <div className="mt-2 rounded-xl border border-primary/30 bg-primary/10 p-3 text-sm font-medium text-brand">
-        ✅ ¡Registrado correctamente!
-      </div>
-    )
-  }
-
-  return (
-    <div className="mt-2 rounded-xl border border-border bg-card p-3 text-sm space-y-2">
-      {!selected ? (
-        <>
-          <p className="text-xs text-muted-foreground font-medium">Selecciona el alimento:</p>
-          <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
-            {foods.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setSelected(f)}
-                className="w-full text-left rounded-lg px-2.5 py-2 hover:bg-muted transition-colors border border-border/50"
-              >
-                <span className="font-medium block truncate">{f.nombre}</span>
-                <span className="text-xs text-muted-foreground">{f.kcal_100g} kcal/100g</span>
-              </button>
-            ))}
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="flex items-center justify-between">
-            <span className="font-semibold truncate max-w-[160px]">{selected.nombre}</span>
-            <button
-              onClick={() => setSelected(null)}
-              className="text-xs text-muted-foreground hover:text-foreground ml-1 shrink-0"
-            >
-              cambiar
-            </button>
-          </div>
-
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label className="text-xs text-muted-foreground">Gramos</label>
-              <input
-                type="number"
-                min="1"
-                max="5000"
-                value={qty}
-                onChange={(e) => setQty(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-2 py-1 text-sm mt-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-            <div className="flex-1">
-              <label className="text-xs text-muted-foreground">Comida</label>
-              <select
-                value={mealType}
-                onChange={(e) => setMealType(e.target.value as MealType)}
-                className="w-full rounded-lg border border-border bg-background px-2 py-1 text-sm mt-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                {MEAL_OPTIONS.map((m) => (
-                  <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {macroPreview && Number(qty) > 0 && (
-            <p className="text-xs text-muted-foreground">
-              {macroPreview.kcal} kcal · P:{macroPreview.proteinas}g · C:{macroPreview.carbohidratos}g · G:{macroPreview.grasas}g
-            </p>
-          )}
-
-          <button
-            onClick={handleConfirm}
-            disabled={saving || !qty}
-            className="w-full rounded-lg bg-primary text-primary-foreground py-2 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
-          >
-            {saving ? 'Guardando…' : '✅ Confirmar registro'}
-          </button>
-        </>
-      )}
-    </div>
-  )
-}
-
-// Macros detectados en una foto: revisar, guardar en catálogo y registrar
-function DetectedFoodCard({
-  detected,
-  onLogged,
-}: {
-  detected: MacroDetectionResult
-  onLogged: () => void
-}) {
-  const isPerUnit = detected.basis === 'per_unit'
-  const [nombre, setNombre] = useState(detected.foodName ?? 'Nuevo alimento')
-  const [qty, setQty] = useState(isPerUnit ? '1' : '100')
-  const [mealType, setMealType] = useState<MealType>('otro')
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState<null | 'catalog' | 'logged'>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  const food: FoodItem = {
-    id: 'detected',
-    nombre,
-    kcal_100g: isPerUnit ? 0 : detected.calories ?? 0,
-    proteinas_100g: isPerUnit ? 0 : detected.proteins ?? 0,
-    grasas_100g: isPerUnit ? 0 : detected.fats ?? 0,
-    carbohidratos_100g: isPerUnit ? 0 : detected.carbs ?? 0,
-    fibra_100g: 0,
-    macros_basis: detected.basis ?? 'per_100g',
-    unit_name: detected.unitName,
-    kcal_per_unit: isPerUnit ? detected.calories ?? 0 : undefined,
-    proteinas_per_unit: isPerUnit ? detected.proteins ?? 0 : undefined,
-    grasas_per_unit: isPerUnit ? detected.fats ?? 0 : undefined,
-    carbohidratos_per_unit: isPerUnit ? detected.carbs ?? 0 : undefined,
-    source: 'usuario',
-  }
-
-  const qtyNum = Number(qty) || 0
-  const preview = qtyNum > 0 ? calcMacros(food, qtyNum, isPerUnit ? qtyNum : undefined) : null
-
-  async function save(alsoLog: boolean) {
-    if (!nombre.trim()) return
-    setSaving(true)
-    setError(null)
-    try {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { error: catalogError } = await supabase.from('alimentos_usuario').insert({
-        user_id: user.id,
-        nombre: nombre.trim(),
-        macros_basis: food.macros_basis,
-        unit_name: food.unit_name ?? null,
-        kcal_100g: food.kcal_100g,
-        proteinas_100g: food.proteinas_100g,
-        grasas_100g: food.grasas_100g,
-        carbohidratos_100g: food.carbohidratos_100g,
-        fibra_100g: 0,
-        kcal_per_unit: food.kcal_per_unit ?? null,
-        proteinas_per_unit: food.proteinas_per_unit ?? null,
-        grasas_per_unit: food.grasas_per_unit ?? null,
-        carbohidratos_per_unit: food.carbohidratos_per_unit ?? null,
-      })
-
-      if (catalogError) {
-        setError('No pude guardar en tu catálogo.')
-        return
-      }
-
-      if (!alsoLog || !preview) {
-        setSaved('catalog')
-        return
-      }
-
-      const today = new Date().toISOString().split('T')[0]
-      const { error: logError } = await supabase.from('consumos').insert({
-        user_id: user.id,
-        alimento_source: 'usuario',
-        nombre_alimento: nombre.trim(),
-        cantidad_gr: qtyNum,
-        cantidad_unit: isPerUnit ? qtyNum : undefined,
-        macros_basis: food.macros_basis,
-        kcal: preview.kcal,
-        proteinas: preview.proteinas,
-        grasas: preview.grasas,
-        carbohidratos: preview.carbohidratos,
-        fibra: preview.fibra,
-        fecha: today,
-        tipo_comida: mealType,
-        numero_comida: 1,
-      })
-
-      if (logError) {
-        setError('Guardado en catálogo, pero no pude registrarlo en el diario.')
-        setSaved('catalog')
-        return
-      }
-
-      setSaved('logged')
-      onLogged()
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (saved) {
-    return (
-      <div className="mt-2 rounded-xl border border-primary/30 bg-primary/10 p-3 text-sm font-medium text-brand">
-        {saved === 'logged' ? '✅ Guardado en tu catálogo y registrado en el diario.' : '✅ Guardado en tu catálogo.'}
-      </div>
-    )
-  }
-
-  return (
-    <div className="mt-2 rounded-xl border border-border bg-card p-3 text-sm space-y-2">
-      <input
-        value={nombre}
-        onChange={(e) => setNombre(e.target.value)}
-        className="w-full rounded-lg border border-border bg-background px-2 py-1 text-sm font-semibold focus:outline-none focus:ring-1 focus:ring-primary"
-      />
-
-      <div className="grid grid-cols-2 gap-1 text-xs text-muted-foreground">
-        <div>🔥 <span className="text-foreground font-medium">{detected.calories ?? '—'} kcal</span></div>
-        <div>🥩 P: <span className="text-foreground font-medium">{detected.proteins ?? '—'}g</span></div>
-        <div>🍞 C: <span className="text-foreground font-medium">{detected.carbs ?? '—'}g</span></div>
-        <div>🧈 G: <span className="text-foreground font-medium">{detected.fats ?? '—'}g</span></div>
-      </div>
-      <p className="text-[10px] text-muted-foreground">
-        {isPerUnit ? `Por ${detected.unitName ?? 'unidad'}` : 'Por 100g'}
-        {typeof detected.confidence === 'number' ? ` · confianza ${Math.round(detected.confidence * 100)}%` : ''}
-      </p>
-
-      <div className="flex gap-2">
-        <div className="flex-1">
-          <label className="text-xs text-muted-foreground">{isPerUnit ? 'Unidades' : 'Gramos'}</label>
-          <input
-            type="number"
-            min="1"
-            max="5000"
-            value={qty}
-            onChange={(e) => setQty(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-2 py-1 text-sm mt-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </div>
-        <div className="flex-1">
-          <label className="text-xs text-muted-foreground">Comida</label>
-          <select
-            value={mealType}
-            onChange={(e) => setMealType(e.target.value as MealType)}
-            className="w-full rounded-lg border border-border bg-background px-2 py-1 text-sm mt-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            {MEAL_OPTIONS.map((m) => (
-              <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {preview && (
-        <p className="text-xs text-muted-foreground">
-          {preview.kcal} kcal · P:{preview.proteinas}g · C:{preview.carbohidratos}g · G:{preview.grasas}g
-        </p>
-      )}
-
-      {error && <p className="text-xs text-destructive">{error}</p>}
-
-      <div className="flex gap-2">
-        <button
-          onClick={() => save(true)}
-          disabled={saving || !nombre.trim() || qtyNum <= 0}
-          className="flex-1 rounded-lg bg-primary text-primary-foreground py-2 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
-        >
-          {saving ? 'Guardando…' : '✅ Guardar y registrar'}
-        </button>
-        <button
-          onClick={() => save(false)}
-          disabled={saving || !nombre.trim()}
-          className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50"
-        >
-          Solo catálogo
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// ─── Main chat core ────────────────────────────────────────────────────────────
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024
 
 export function ChatCore({ fullPage = false }: { fullPage?: boolean }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome',
-      role: 'assistant',
-      content:
-        '¡Hola! Soy MacrAI, tu asistente de nutrición. Dime qué has comido ("añade 150g de pollo a la comida"), mándame una foto de la etiqueta 📷 o díctamelo con el micro 🎙️. ¿Qué te apunto?',
-    },
-  ])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [recording, setRecording] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const galleryInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
+
+  const isEmpty = messages.length === 0
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -459,271 +57,371 @@ export function ChatCore({ fullPage = false }: { fullPage?: boolean }) {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages, scrollToBottom])
+  }, [messages, loading, scrollToBottom])
 
   function pushAssistant(msg: Omit<Extract<ChatMessage, { role: 'assistant' }>, 'id' | 'role'>) {
     setMessages((prev) => [...prev, { id: `${Date.now()}-a`, role: 'assistant', ...msg }])
   }
 
-  async function sendText(text: string) {
-    const trimmed = text.trim()
-    if (!trimmed || loading) return
+  // Envía al agente y devuelve la respuesta, para que el modo voz pueda leerla.
+  const askAgent = useCallback(
+    async (text: string): Promise<string> => {
+      const trimmed = text.trim()
+      if (!trimmed) return ''
 
-    setMessages((prev) => [...prev, { id: `${Date.now()}-u`, role: 'user', content: trimmed }])
-    setInput('')
-    setLoading(true)
+      setMessages((prev) => [...prev, { id: `${Date.now()}-u`, role: 'user', content: trimmed }])
+      setInput('')
+      setLoading(true)
 
-    try {
-      const history: AgentHistory[] = messages
-        .filter((m) => m.id !== 'welcome')
-        .slice(-8)
-        .map((m) => ({ role: m.role, content: m.content }))
+      try {
+        const history: AgentHistory[] = messages
+          .slice(-8)
+          .map((m) => ({ role: m.role, content: m.content }))
 
-      const res = await fetch('/api/agent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: trimmed, history }),
-      })
+        const res = await fetch('/api/agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: trimmed, history }),
+        })
+        if (!res.ok) throw new Error('API error')
 
-      if (!res.ok) throw new Error('API error')
+        const data = (await res.json()) as AgentApiResponse
+        pushAssistant({ content: data.reply, action: data.action, data: data.data })
 
-      const data = (await res.json()) as AgentApiResponse
-      pushAssistant({ content: data.reply, action: data.action, data: data.data })
-    } catch {
-      pushAssistant({ content: 'Lo siento, ha habido un error. Inténtalo de nuevo.' })
-    } finally {
-      setLoading(false)
-    }
-  }
+        // Las mutaciones desde el chat deben verse al instante en el resto de la app.
+        if (data.action === 'catalog_changed' || data.action === 'log_changed') router.refresh()
 
-  // ── Foto ──
-  async function handlePhotoSelected(file: File) {
+        return data.reply
+      } catch {
+        const fallback = 'Ha habido un error. Inténtalo de nuevo.'
+        pushAssistant({ content: fallback })
+        return fallback
+      } finally {
+        setLoading(false)
+      }
+    },
+    [messages, router]
+  )
+
+  const speechRef = useRef<ReturnType<typeof useSpeech> | null>(null)
+
+  const speech = useSpeech({
+    // Dictado: el texto aterriza en el input y lo envía el usuario, no el micro.
+    onDictation: (text) => {
+      setInput((prev) => (prev ? `${prev} ${text}` : text))
+      textareaRef.current?.focus()
+    },
+    onConversationTurn: async (text) => {
+      const reply = await askAgent(text)
+      if (reply) speechRef.current?.speak(reply)
+    },
+  })
+
+  useEffect(() => {
+    speechRef.current = speech
+  })
+
+  const conversationMode = speech.mode === 'conversation'
+  const dictating = speech.mode === 'dictation'
+  const busy = loading || dictating
+
+  async function handleImage(file: File) {
     if (loading) return
-    if (file.size > 6 * 1024 * 1024) {
-      pushAssistant({ content: 'La foto es muy grande (máx. 6MB). Prueba con otra más ligera.' })
+    if (file.size > MAX_IMAGE_BYTES) {
+      pushAssistant({ content: 'La foto pesa demasiado (máx. 6 MB). Prueba con otra.' })
       return
     }
 
-    setMessages((prev) => [...prev, { id: `${Date.now()}-u`, role: 'user', content: '📷 Foto enviada' }])
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+
+    setMessages((prev) => [
+      ...prev,
+      { id: `${Date.now()}-u`, role: 'user', content: 'Foto de la etiqueta', image: dataUrl },
+    ])
     setLoading(true)
 
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(reader.result as string)
-        reader.onerror = reject
-        reader.readAsDataURL(file)
-      })
-
       const res = await fetch('/api/agent/photo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: dataUrl }),
       })
-
       const detected = (await res.json()) as MacroDetectionResult
 
       if (!res.ok || !detected.success) {
         pushAssistant({
           content:
             detected.error ??
-            'No pude leer los macros de la foto. Prueba con una imagen más cercana de la etiqueta, o díctame los macros.',
+            'No he podido leer los macros. Prueba con la etiqueta más cerca, o dímelos tú.',
         })
         return
       }
 
-      pushAssistant({
-        content: `He detectado esto en la foto. Revisa los datos y confirma:`,
-        detected,
-      })
+      pushAssistant({ content: 'Esto es lo que he leído. Revísalo y confirma:', detected })
     } catch {
-      pushAssistant({ content: 'No pude procesar la foto. Inténtalo de nuevo.' })
+      pushAssistant({ content: 'No he podido procesar la foto.' })
     } finally {
       setLoading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
+      if (cameraInputRef.current) cameraInputRef.current.value = ''
+      if (galleryInputRef.current) galleryInputRef.current.value = ''
     }
   }
 
-  // ── Audio ──
-  async function toggleRecording() {
-    if (recording) {
-      mediaRecorderRef.current?.stop()
-      setRecording(false)
-      return
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
-      audioChunksRef.current = []
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data)
-      }
-
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop())
-        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
-        if (blob.size < 1000) return
-
-        setLoading(true)
-        try {
-          const form = new FormData()
-          form.append('audio', blob, 'audio.webm')
-          const res = await fetch('/api/transcribe', { method: 'POST', body: form })
-          const data = (await res.json()) as { text?: string; error?: string }
-
-          if (!res.ok || !data.text?.trim()) {
-            pushAssistant({ content: 'No pude transcribir el audio. Inténtalo de nuevo o escríbeme.' })
-            return
-          }
-
-          setLoading(false)
-          await sendText(data.text)
-        } catch {
-          pushAssistant({ content: 'Error transcribiendo el audio. Inténtalo de nuevo.' })
-        } finally {
-          setLoading(false)
-        }
-      }
-
-      recorder.start()
-      mediaRecorderRef.current = recorder
-      setRecording(true)
-    } catch {
-      pushAssistant({ content: 'No tengo acceso al micrófono. Revisa los permisos del navegador.' })
-    }
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      sendText(input)
+      void askAgent(input)
     }
   }
 
-  function handleLogged() {
-    router.refresh()
+  function autoGrow(el: HTMLTextAreaElement) {
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+  }
+
+  // ─── Modo conversación a pantalla completa ───────────────────────────────────
+  if (conversationMode) {
+    const scale = 1 + Math.min(speech.level * 9, 1.1)
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-8 p-8">
+        <div className="relative flex h-40 w-40 items-center justify-center">
+          <span
+            className="absolute inset-0 rounded-full bg-primary/20 transition-transform duration-100"
+            style={{ transform: `scale(${scale})` }}
+          />
+          <span className="absolute inset-4 rounded-full bg-primary/30" />
+          <LogoMark size={56} className="relative" />
+        </div>
+
+        <div className="text-center">
+          <p className="font-head text-lg font-semibold">
+            {speech.speaking ? 'MacrAI está hablando' : loading ? 'Pensando…' : 'Te escucho'}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Habla con normalidad. Cuando pares, te respondo.
+          </p>
+        </div>
+
+        <button
+          onClick={speech.cancel}
+          className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-3 text-sm font-semibold transition-colors hover:bg-accent"
+        >
+          <X className="h-4 w-4" />
+          Salir del modo voz
+        </button>
+      </div>
+    )
   }
 
   return (
-    <div className={`flex flex-col ${fullPage ? 'h-full' : 'flex-1 min-h-0'}`}>
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
-        {messages.map((msg) => (
-          <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`${fullPage ? 'max-w-[75%] md:max-w-[60%]' : 'max-w-[85%]'} ${msg.role === 'user' ? 'order-1' : ''}`}>
-              <div
-                className={`rounded-2xl px-3 py-2 text-sm leading-relaxed ${
-                  msg.role === 'user'
-                    ? 'bg-primary text-primary-foreground rounded-tr-sm'
-                    : 'bg-muted text-foreground rounded-tl-sm'
-                }`}
-              >
-                {msg.content}
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Conversación */}
+      <div className="flex-1 overflow-y-auto">
+        <div className={cn('mx-auto w-full', fullPage ? 'max-w-3xl px-4 py-6' : 'px-3 py-4')}>
+          {isEmpty ? (
+            <div className="flex flex-col items-center py-10 text-center">
+              <LogoMark size={44} />
+              <h2 className="font-head mt-4 text-xl font-semibold">¿Qué has comido?</h2>
+              <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                Díctamelo, escríbelo o mándame una foto de la etiqueta. Yo lo apunto.
+              </p>
+              <div className={cn('mt-6 flex w-full max-w-md flex-col gap-2', !fullPage && 'mt-4')}>
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => void askAgent(s)}
+                    className="rounded-xl border border-border px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent"
+                  >
+                    {s}
+                  </button>
+                ))}
               </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {messages.map((msg) =>
+                msg.role === 'user' ? (
+                  <div key={msg.id} className="flex justify-end">
+                    <div className="max-w-[85%] rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-sm text-primary-foreground">
+                      {msg.image && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={msg.image}
+                          alt="Foto enviada"
+                          className="mb-2 max-h-48 rounded-lg object-cover"
+                        />
+                      )}
+                      {msg.content}
+                    </div>
+                  </div>
+                ) : (
+                  <div key={msg.id} className="flex gap-3">
+                    <LogoMark size={26} className="mt-0.5 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm leading-relaxed">{msg.content}</p>
+                      {msg.action === 'macros_data' && <MacroCard macros={msg.data?.macros} />}
+                      {msg.action === 'history_data' && <HistoryCard days={msg.data?.days} />}
+                      {msg.action === 'catalog_data' && <CatalogCard catalog={msg.data?.catalog} />}
+                      {msg.action === 'food_options' && msg.data?.foods && (
+                        <FoodOptionsCard
+                          foods={msg.data.foods as FoodOption[]}
+                          defaultQty={msg.data.qty}
+                          defaultMealType={msg.data.mealType}
+                          onLogged={() => router.refresh()}
+                        />
+                      )}
+                      {msg.action === 'need_details' && (
+                        <button
+                          onClick={() => cameraInputRef.current?.click()}
+                          className="mt-2 inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent"
+                        >
+                          <Camera className="h-3.5 w-3.5" />
+                          Enviar foto de la etiqueta
+                        </button>
+                      )}
+                      {msg.detected && (
+                        <DetectedFoodCard detected={msg.detected} onLogged={() => router.refresh()} />
+                      )}
+                    </div>
+                  </div>
+                )
+              )}
 
-              {msg.role === 'assistant' && msg.action === 'macros_data' && (
-                <MacroCard macros={msg.data?.macros} />
-              )}
-              {msg.role === 'assistant' && msg.action === 'history_data' && (
-                <HistoryCard days={msg.data?.days} />
-              )}
-              {msg.role === 'assistant' && msg.action === 'catalog_data' && (
-                <CatalogCard catalog={msg.data?.catalog} />
-              )}
-              {msg.role === 'assistant' && msg.action === 'food_options' && msg.data?.foods && (
-                <FoodOptionsCard
-                  foods={msg.data.foods as FoodOption[]}
-                  defaultQty={msg.data.qty}
-                  defaultMealType={msg.data.mealType}
-                  onLogged={handleLogged}
-                />
-              )}
-              {msg.role === 'assistant' && msg.action === 'need_details' && (
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="mt-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-brand hover:bg-primary/20 transition-colors"
-                >
-                  📷 Enviar foto de la etiqueta
-                </button>
-              )}
-              {msg.role === 'assistant' && msg.detected && (
-                <DetectedFoodCard detected={msg.detected} onLogged={handleLogged} />
+              {loading && (
+                <div className="flex gap-3">
+                  <LogoMark size={26} className="mt-0.5 shrink-0" />
+                  <div className="flex items-center gap-1 pt-1.5">
+                    {[0, 150, 300].map((d) => (
+                      <span
+                        key={d}
+                        className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground"
+                        style={{ animationDelay: `${d}ms` }}
+                      />
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
-          </div>
-        ))}
-
-        {loading && (
-          <div className="flex justify-start">
-            <div className="bg-muted rounded-2xl rounded-tl-sm px-3 py-2 text-sm text-muted-foreground flex items-center gap-1">
-              <span className="animate-pulse">●</span>
-              <span className="animate-pulse delay-75">●</span>
-              <span className="animate-pulse delay-150">●</span>
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
+          )}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
-      {/* Input */}
-      <div className="border-t border-border p-3">
-        <div className="flex gap-2 items-center">
+      {/* Composer */}
+      <div className="border-t border-border bg-background">
+        <div className={cn('mx-auto w-full', fullPage ? 'max-w-3xl px-4 py-3' : 'px-2 py-2')}>
+          {speech.error && <p className="mb-2 text-xs text-destructive">{speech.error}</p>}
+
           <input
-            ref={fileInputRef}
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) void handleImage(f)
+            }}
+          />
+          <input
+            ref={galleryInputRef}
             type="file"
             accept="image/*"
             className="hidden"
             onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) handlePhotoSelected(file)
+              const f = e.target.files?.[0]
+              if (f) void handleImage(f)
             }}
           />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={loading || recording}
-            className="rounded-xl border border-border px-2.5 py-2 text-base hover:bg-muted transition-colors disabled:opacity-50"
-            aria-label="Enviar foto"
-            title="Enviar foto de etiqueta o plato"
+
+          <div
+            className={cn(
+              'flex items-end gap-1 rounded-2xl border bg-card px-2 py-1.5 transition-colors',
+              dictating ? 'border-destructive' : 'border-border focus-within:border-primary'
+            )}
           >
-            📎
-          </button>
-          <button
-            onClick={toggleRecording}
-            disabled={loading}
-            className={`rounded-xl px-2.5 py-2 text-base transition-colors disabled:opacity-50 ${
-              recording
-                ? 'bg-red-500 text-white animate-pulse'
-                : 'border border-border hover:bg-muted'
-            }`}
-            aria-label={recording ? 'Parar grabación' : 'Grabar audio'}
-            title={recording ? 'Parar y enviar' : 'Dictar por voz'}
-          >
-            🎙️
-          </button>
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={recording ? 'Grabando… pulsa 🎙️ para enviar' : 'Escríbeme algo…'}
-            disabled={loading || recording}
-            className="flex-1 min-w-0 rounded-xl border border-border bg-muted/50 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-          />
-          <button
-            onClick={() => sendText(input)}
-            disabled={loading || recording || !input.trim()}
-            className="rounded-xl bg-primary text-primary-foreground px-3 py-2 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
-          >
-            ↑
-          </button>
+            <button
+              onClick={() => cameraInputRef.current?.click()}
+              disabled={busy}
+              title="Hacer foto"
+              aria-label="Hacer foto"
+              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+            >
+              <Camera className="h-5 w-5" />
+            </button>
+            {fullPage && (
+              <button
+                onClick={() => galleryInputRef.current?.click()}
+                disabled={busy}
+                title="Subir de galería"
+                aria-label="Subir de galería"
+                className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+              >
+                <Paperclip className="h-5 w-5" />
+              </button>
+            )}
+
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value)
+                autoGrow(e.target)
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder={dictating ? 'Escuchando…' : 'Escribe o dicta lo que has comido'}
+              disabled={loading}
+              className="max-h-40 flex-1 resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
+            />
+
+            <button
+              onClick={() => (dictating ? speech.stop() : void speech.start('dictation'))}
+              disabled={loading}
+              title={dictating ? 'Parar y transcribir' : 'Dictar'}
+              aria-label={dictating ? 'Parar y transcribir' : 'Dictar'}
+              className={cn(
+                'rounded-lg p-2 transition-colors disabled:opacity-40',
+                dictating
+                  ? 'bg-destructive text-destructive-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+              )}
+            >
+              {dictating ? <Square className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+            </button>
+
+            <button
+              onClick={() => void speech.start('conversation')}
+              disabled={busy}
+              title="Modo conversación"
+              aria-label="Modo conversación"
+              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+            >
+              <AudioLines className="h-5 w-5" />
+            </button>
+
+            <button
+              onClick={() => void askAgent(input)}
+              disabled={busy || !input.trim()}
+              title="Enviar"
+              aria-label="Enviar"
+              className="rounded-lg bg-primary p-2 text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+            >
+              <ArrowUp className="h-5 w-5" />
+            </button>
+          </div>
+
+          <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
+            {dictating
+              ? 'Pulsa el cuadrado para transcribir. Podrás revisarlo antes de enviar.'
+              : 'MacrAI puede equivocarse. Revisa los macros antes de confirmar.'}
+          </p>
         </div>
-        <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
-          Ej: "añade 150g de pollo en la comida" · foto de etiqueta 📎 · dictado 🎙️
-        </p>
       </div>
     </div>
   )
