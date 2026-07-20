@@ -161,7 +161,7 @@ export default function PerfilPage() {
   return (
     <AppLayout>
       <div className="max-w-2xl space-y-6">
-        <h1 className="text-2xl font-bold">{t('title')}</h1>
+        <h1 className="font-head text-2xl font-bold tracking-tight">{t('title')}</h1>
 
         <Card>
           <CardHeader>

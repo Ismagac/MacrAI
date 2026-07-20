@@ -126,7 +126,7 @@ export default function ObjetivosPage() {
   return (
     <AppLayout>
       <div className="max-w-2xl space-y-6">
-        <h1 className="text-2xl font-bold">{t('title')}</h1>
+        <h1 className="font-head text-2xl font-bold tracking-tight">{t('title')}</h1>
 
         {/* Active goals summary */}
         {!loading && objetivos.length > 0 && (
@@ -139,7 +139,7 @@ export default function ObjetivosPage() {
                     <div className="flex items-center justify-between mb-1">
                       <Badge variant="secondary" className="text-xs">{t(o.periodo)}</Badge>
                     </div>
-                    <p className="text-xl font-bold">{o.kcal_objetivo} <span className="text-xs font-normal">kcal</span></p>
+                    <p className="metric text-xl">{o.kcal_objetivo} <span className="text-xs font-normal text-muted-foreground">kcal</span></p>
                     <p className="text-xs text-muted-foreground">
                       P:{o.proteinas_objetivo}g · C:{o.carbohidratos_objetivo}g · G:{o.grasas_objetivo}g
                     </p>

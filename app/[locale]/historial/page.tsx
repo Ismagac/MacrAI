@@ -33,17 +33,19 @@ function StatsTable({ stats }: { stats: DayStats[] }) {
   }
 
   return (
-    <div className="grid grid-cols-4 gap-3 mt-4">
+    <div className="mt-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
       {[
-        { label: 'Promedio kcal', value: avg.kcal, unit: 'kcal', color: 'text-orange-500' },
-        { label: 'Prot. media', value: avg.proteinas, unit: 'g', color: 'text-blue-500' },
-        { label: 'Carbs media', value: avg.carbohidratos, unit: 'g', color: 'text-amber-500' },
-        { label: 'Grasas media', value: avg.grasas, unit: 'g', color: 'text-red-500' },
+        { label: 'Promedio kcal', value: avg.kcal, unit: 'kcal', cls: '' },
+        { label: 'Prot. media', value: avg.proteinas, unit: 'g', cls: 'macro-protein' },
+        { label: 'Carbs media', value: avg.carbohidratos, unit: 'g', cls: 'macro-carbs' },
+        { label: 'Grasas media', value: avg.grasas, unit: 'g', cls: 'macro-fat' },
       ].map((s) => (
-        <div key={s.label} className="rounded-xl border p-3 text-center">
-          <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
-          <p className="text-[10px] text-muted-foreground">{s.unit}</p>
-          <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
+        <div key={s.label} className="surface-card p-3">
+          <p className="label-caps">{s.label}</p>
+          <p className="metric mt-1 text-2xl">
+            <span className={s.cls}>{s.value}</span>
+            <span className="ml-0.5 text-sm font-normal text-muted-foreground">{s.unit}</span>
+          </p>
         </div>
       ))}
     </div>
@@ -78,7 +80,7 @@ export default function HistorialPage() {
   return (
     <AppLayout>
       <div className="space-y-5">
-        <h1 className="text-2xl font-bold">{t('title')}</h1>
+        <h1 className="font-head text-2xl font-bold tracking-tight">{t('title')}</h1>
 
         <Tabs
           defaultValue="week"
@@ -95,7 +97,7 @@ export default function HistorialPage() {
           <TabsContent value="week" className="space-y-4 mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Macros esta semana</CardTitle>
+                <CardTitle className="label-caps">Macros esta semana</CardTitle>
               </CardHeader>
               <CardContent>
                 {loading ? (
@@ -115,7 +117,7 @@ export default function HistorialPage() {
           <TabsContent value="month" className="space-y-4 mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Macros este mes</CardTitle>
+                <CardTitle className="label-caps">Macros este mes</CardTitle>
               </CardHeader>
               <CardContent>
                 {loading ? (

@@ -96,16 +96,16 @@ export function TelegramBanner() {
   // Already linked
   if (status.linked) {
     return (
-      <Card className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30">
+      <Card className="border-primary/30 bg-primary/5">
         <CardContent className="pt-4 pb-4">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 shrink-0" />
+              <CheckCircle2 className="h-5 w-5 text-brand shrink-0" />
               <div>
-                <p className="font-semibold text-green-800 dark:text-green-300 text-sm">
+                <p className="text-sm font-semibold">
                   {t('linked')}
                 </p>
-                <p className="text-xs text-green-700 dark:text-green-400">
+                <p className="text-xs text-muted-foreground">
                   Gestiona tu dieta directamente en Telegram
                 </p>
               </div>
@@ -114,7 +114,7 @@ export function TelegramBanner() {
               <Button
                 variant="outline"
                 size="sm"
-                className="text-xs border-green-300 dark:border-green-700"
+                className="text-xs"
                 asChild
               >
                 <a

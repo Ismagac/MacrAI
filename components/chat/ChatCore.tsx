@@ -168,7 +168,7 @@ function FoodOptionsCard({
 
   if (saved) {
     return (
-      <div className="mt-2 rounded-xl border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-600 dark:text-green-400 font-medium">
+      <div className="mt-2 rounded-xl border border-primary/30 bg-primary/10 p-3 text-sm font-medium text-brand">
         ✅ ¡Registrado correctamente!
       </div>
     )
@@ -353,7 +353,7 @@ function DetectedFoodCard({
 
   if (saved) {
     return (
-      <div className="mt-2 rounded-xl border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-600 dark:text-green-400 font-medium">
+      <div className="mt-2 rounded-xl border border-primary/30 bg-primary/10 p-3 text-sm font-medium text-brand">
         {saved === 'logged' ? '✅ Guardado en tu catálogo y registrado en el diario.' : '✅ Guardado en tu catálogo.'}
       </div>
     )

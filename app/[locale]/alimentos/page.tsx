@@ -265,7 +265,7 @@ export default function AlimentosPage() {
   return (
     <AppLayout>
       <div className="space-y-5">
-        <h1 className="text-2xl font-bold">{t('title')}</h1>
+        <h1 className="font-head text-2xl font-bold tracking-tight">{t('title')}</h1>
 
         <Tabs defaultValue="search">
           <TabsList>
