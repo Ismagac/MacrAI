@@ -2,115 +2,78 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  MacrAI Signature
+  Un único color de marca: lima eléctrico #C4F82A. Dos temas, claro y oscuro.
+  La profundidad viene de bordes hairline y saltos de fondo, nunca de sombras ni degradados.
+*/
+
 @layer base {
   :root {
-    --background: 210 20% 97%;
-    --foreground: 220 10% 12%;
+    /* Claro: off-white cálido, nunca blanco puro de fondo */
+    --background: 60 20% 97%;
+    --foreground: 220 12% 5%;
     --card: 0 0% 100%;
-    --card-foreground: 220 10% 12%;
+    --card-foreground: 220 12% 5%;
     --popover: 0 0% 100%;
-    --popover-foreground: 220 10% 12%;
-    --primary: 160 84% 39%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 210 18% 94%;
-    --secondary-foreground: 220 10% 12%;
-    --muted: 214 20% 95%;
-    --muted-foreground: 214 14% 49%;
-    --accent: 214 20% 95%;
-    --accent-foreground: 220 10% 12%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 20% 98%;
-    --border: 214 18% 90%;
-    --input: 214 18% 90%;
-    --ring: 160 84% 39%;
+    --popover-foreground: 220 12% 5%;
+
+    /* Lima: siempre relleno con texto casi negro encima, nunca al revés */
+    --primary: 76 94% 57%;
+    --primary-foreground: 220 12% 5%;
+
+    --secondary: 60 12% 94%;
+    --secondary-foreground: 220 12% 5%;
+    --muted: 60 12% 94%;
+    --muted-foreground: 215 6% 40%;
+    --accent: 60 12% 94%;
+    --accent-foreground: 220 12% 5%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 70 8% 89%;
+    --input: 70 8% 89%;
+    --ring: 76 94% 57%;
     --radius: 0.75rem;
 
-    --macro-protein: #1e88e5;
-    --macro-carbs: #f5b041;
-    --macro-fat: #689f38;
-    --macro-fiber: #7e57c2;
+    /* En claro los macros necesitan tonos oscuros para pasar contraste sobre blanco */
+    --macro-protein: #0284c7;
+    --macro-carbs: #ea7317;
+    --macro-fat: #a37a04;
+    --macro-fiber: #7c5cd6;
 
-    --track-empty: #e5e8ed;
-    --card-shadow-soft: 0px 8px 24px rgba(149, 157, 165, 0.1);
+    --track-empty: #e6e7e2;
   }
 
   .dark {
-    --background: 230 24% 5%;
-    --foreground: 0 0% 100%;
-    --card: 226 18% 11%;
-    --card-foreground: 0 0% 100%;
-    --popover: 226 18% 11%;
-    --popover-foreground: 0 0% 100%;
-    --primary: 149 100% 45%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 224 20% 13%;
-    --secondary-foreground: 0 0% 100%;
-    --muted: 226 15% 12%;
-    --muted-foreground: 227 14% 67%;
-    --accent: 226 15% 12%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 20% 98%;
-    --border: 224 16% 18%;
-    --input: 224 16% 18%;
-    --ring: 149 100% 45%;
+    /* Oscuro: casi negro ligeramente frío */
+    --background: 220 12% 5%;
+    --foreground: 80 8% 96%;
+    --card: 220 12% 9%;
+    --card-foreground: 80 8% 96%;
+    --popover: 220 13% 12%;
+    --popover-foreground: 80 8% 96%;
 
-    --macro-protein: #00b0ff;
-    --macro-carbs: #ffd700;
-    --macro-fat: #aeea00;
-    --macro-fiber: #69f0ae;
+    --primary: 76 94% 57%;
+    --primary-foreground: 220 12% 5%;
 
-    --track-empty: #252830;
-  }
+    --secondary: 220 13% 12%;
+    --secondary-foreground: 80 8% 96%;
+    --muted: 220 13% 12%;
+    --muted-foreground: 213 8% 64%;
+    --accent: 220 13% 12%;
+    --accent-foreground: 80 8% 96%;
+    --destructive: 0 100% 67%;
+    --destructive-foreground: 220 12% 5%;
+    --border: 222 10% 17%;
+    --input: 222 10% 17%;
+    --ring: 76 94% 57%;
 
-  :root[data-accent='green'] {
-    --primary: 160 84% 39%;
-    --ring: 160 84% 39%;
-  }
+    --macro-protein: #7dd3fc;
+    --macro-carbs: #fb923c;
+    --macro-fat: #f5d547;
+    --macro-fiber: #a78bfa;
 
-  :root[data-accent='lilac'] {
-    --primary: 262 83% 58%;
-    --ring: 262 83% 58%;
-  }
-
-  :root[data-accent='pink'] {
-    --primary: 336 80% 58%;
-    --ring: 336 80% 58%;
-  }
-
-  :root[data-accent='sky'] {
-    --primary: 199 89% 48%;
-    --ring: 199 89% 48%;
-  }
-
-  :root[data-accent='amber'] {
-    --primary: 35 92% 49%;
-    --ring: 35 92% 49%;
-  }
-
-  .dark[data-accent='green'] {
-    --primary: 149 100% 45%;
-    --ring: 149 100% 45%;
-  }
-
-  .dark[data-accent='lilac'] {
-    --primary: 270 100% 69%;
-    --ring: 270 100% 69%;
-  }
-
-  .dark[data-accent='pink'] {
-    --primary: 330 100% 67%;
-    --ring: 330 100% 67%;
-  }
-
-  .dark[data-accent='sky'] {
-    --primary: 198 100% 58%;
-    --ring: 198 100% 58%;
-  }
-
-  .dark[data-accent='amber'] {
-    --primary: 40 100% 54%;
-    --ring: 40 100% 54%;
+    --track-empty: #26292f;
   }
 }
 
@@ -132,25 +95,41 @@
   body {
     font-family: var(--font-body), ui-sans-serif, sans-serif;
     @apply bg-background text-foreground;
-    background: hsl(var(--background));
+  }
+
+  /* Las cifras son el producto: siempre alineadas verticalmente */
+  table td,
+  table th {
+    font-variant-numeric: tabular-nums;
   }
 }
 
 @layer components {
+  /* Superficie base: plana, borde hairline, sin sombra */
   .surface-card {
-    @apply rounded-xl bg-card text-card-foreground;
-    box-shadow: var(--card-shadow-soft);
-    border: none;
-  }
-
-  .surface-glow {
-    box-shadow: var(--card-shadow-soft);
+    @apply rounded-xl border border-border bg-card text-card-foreground;
   }
 
   .surface-premium {
-    @apply rounded-xl bg-card text-card-foreground;
-    box-shadow: var(--card-shadow-soft);
-    border: none;
+    @apply rounded-xl border border-border bg-card text-card-foreground;
+  }
+
+  /* Sombra solo en capas que de verdad flotan (modales, overlays) */
+  .surface-glow {
+    box-shadow: 0 12px 32px -12px rgb(0 0 0 / 0.35);
+  }
+
+  /* Cifras y titulares en la tipografía de marca */
+  .metric {
+    font-family: var(--font-head), ui-sans-serif, sans-serif;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    @apply font-bold;
+  }
+
+  .label-caps {
+    @apply text-[11px] font-semibold uppercase text-muted-foreground;
+    letter-spacing: 0.08em;
   }
 
   .macro-protein {
@@ -187,18 +166,5 @@
 
   .macro-track {
     background-color: var(--track-empty);
-  }
-
-  .dark .surface-card,
-  .dark .surface-premium {
-    border: 1px solid #252a34;
-    background: linear-gradient(180deg, #1a1f2a 0%, #161920 100%);
-    box-shadow: none;
-  }
-
-  .dark .surface-glow {
-    box-shadow:
-      0 0 0 1px #252a34,
-      0 8px 24px rgba(0, 0, 0, 0.35);
   }
 }

@@ -5,7 +5,7 @@ import { NextIntlClientProvider } from 'next-intl'
 import { getMessages } from 'next-intl/server'
 import { ThemeProvider } from 'next-themes'
 import { Toaster } from '@/components/ui/toaster'
-import { AccentThemeProvider } from '@/components/theme/AccentThemeProvider'
+import { ThemeSync } from '@/components/theme/ThemeSync'
 import { notFound } from 'next/navigation'
 import { routing } from '@/i18n/routing'
 
@@ -41,12 +41,12 @@ export default async function LocaleLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <AccentThemeProvider>
+          <ThemeSync>
             <NextIntlClientProvider messages={messages}>
               {children}
               <Toaster />
             </NextIntlClientProvider>
-          </AccentThemeProvider>
+          </ThemeSync>
         </ThemeProvider>
       </body>
     </html>

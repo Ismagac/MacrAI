@@ -25,7 +25,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/components/ui/use-toast'
 import type { ActivityLevel, Sexo } from '@/types'
 import { Zap, KeyRound } from 'lucide-react'
-import { ACCENT_THEMES, type AccentTheme, getStoredAccentTheme, setStoredAccentTheme } from '@/lib/theme/accent'
 
 const schema = z.object({
   username: z.string().optional(),
@@ -46,15 +45,10 @@ export default function PerfilPage() {
   const { theme, setTheme } = useTheme()
   const { profile, loading, updateProfile } = useProfile()
   const { toast } = useToast()
-  const [accentTheme, setAccentTheme] = useState<AccentTheme>('green')
   const [llmProvider, setLlmProvider] = useState('groq')
   const [llmKey, setLlmKey] = useState('')
   const [llmConfigured, setLlmConfigured] = useState<string | null>(null)
   const [llmSaving, setLlmSaving] = useState(false)
-
-  useEffect(() => {
-    setAccentTheme(getStoredAccentTheme())
-  }, [])
 
   useEffect(() => {
     fetch('/api/llm-key')
@@ -70,11 +64,6 @@ export default function PerfilPage() {
 
   useEffect(() => {
     if (!profile) return
-
-    if (profile.accent_theme) {
-      setStoredAccentTheme(profile.accent_theme)
-      setAccentTheme(profile.accent_theme)
-    }
 
     if (profile.theme_mode) {
       setTheme(profile.theme_mode)
@@ -128,14 +117,6 @@ export default function PerfilPage() {
     }
   }
 
-  async function handleAccentThemeChange(color: AccentTheme) {
-    setStoredAccentTheme(color)
-    setAccentTheme(color)
-    const err = await updateProfile({ accent_theme: color })
-    if (err) {
-      toast({ title: 'No se pudo guardar el color primario', variant: 'destructive' })
-    }
-  }
 
   function useTDEEAsGoal() {
     if (tdee) router.push(`/${locale}/objetivos?kcal=${tdee.tdee}`)
@@ -217,35 +198,6 @@ export default function PerfilPage() {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label>{t('primaryColor')}</Label>
-              <div className="flex flex-wrap gap-2">
-                {ACCENT_THEMES.map((color) => {
-                  const bg =
-                    color === 'green'
-                      ? 'bg-[#10B981]'
-                      : color === 'lilac'
-                        ? 'bg-[#8B5CF6]'
-                        : color === 'pink'
-                          ? 'bg-[#EC4899]'
-                          : color === 'sky'
-                            ? 'bg-[#0EA5E9]'
-                            : 'bg-[#F59E0B]'
-
-                  return (
-                    <button
-                      key={color}
-                      type="button"
-                      onClick={() => handleAccentThemeChange(color)}
-                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition hover:scale-[1.02] ${accentTheme === color ? 'border-primary ring-2 ring-primary/40' : 'border-border'}`}
-                    >
-                      <span className={`h-3.5 w-3.5 rounded-full ${bg}`} />
-                      {t(`color_${color}` as 'color_green')}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
           </CardContent>
         </Card>
 
