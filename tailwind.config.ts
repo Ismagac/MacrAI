@@ -15,6 +15,10 @@ const config: Config = {
       screens: { '2xl': '1400px' },
     },
     extend: {
+      fontFamily: {
+        head: ['var(--font-head)', 'system-ui', 'sans-serif'],
+        body: ['var(--font-body)', 'system-ui', 'sans-serif'],
+      },
       colors: {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',

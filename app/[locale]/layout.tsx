@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Manrope, Sora } from 'next/font/google'
+import { DM_Sans, Sora } from 'next/font/google'
 import '../globals.css'
 import { NextIntlClientProvider } from 'next-intl'
 import { getMessages } from 'next-intl/server'
@@ -9,7 +9,7 @@ import { AccentThemeProvider } from '@/components/theme/AccentThemeProvider'
 import { notFound } from 'next/navigation'
 import { routing } from '@/i18n/routing'
 
-const manrope = Manrope({ subsets: ['latin'], variable: '--font-body' })
+const dmSans = DM_Sans({ subsets: ['latin'], variable: '--font-body' })
 const sora = Sora({ subsets: ['latin'], variable: '--font-head' })
 
 export const metadata: Metadata = {
@@ -34,7 +34,7 @@ export default async function LocaleLayout({
 
   return (
     <html lang={locale} suppressHydrationWarning>
-      <body className={`${manrope.variable} ${sora.variable}`}>
+      <body className={`${dmSans.variable} ${sora.variable}`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

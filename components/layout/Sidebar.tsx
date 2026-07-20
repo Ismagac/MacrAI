@@ -10,10 +10,10 @@ import {
   Apple,
   User,
   Target,
-  Zap,
   MessageCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
+import { Logo } from '@/components/brand/Logo'
 
 const navItems = [
   { key: 'chat', href: '/chat', icon: MessageCircle },
@@ -31,20 +31,14 @@ export function Sidebar() {
   const pathname = usePathname()
 
   return (
-    <aside className="hidden md:flex flex-col w-[260px] shrink-0 border-r border-border bg-background h-screen sticky top-0">
+    <aside className="hidden md:flex flex-col w-[232px] shrink-0 border-r border-border bg-background h-screen sticky top-0">
       {/* Logo */}
-      <div className="px-5 py-6 border-b border-border">
-        <div className="flex items-center gap-2">
-          <Zap className="h-4 w-4 text-primary" />
-          <div>
-            <p className="text-2xl font-black leading-none tracking-tight">MacrAI</p>
-            <p className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground mt-1">Premium Nutrition</p>
-          </div>
-        </div>
+      <div className="px-4 py-4 border-b border-border">
+        <Logo size={30} />
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
+      <nav className="flex-1 px-2.5 py-3 space-y-1 overflow-y-auto">
         {navItems.map(({ key, href, icon: Icon }) => {
           const fullHref = `/${locale}${href}`
           const isActive = pathname === fullHref || pathname.startsWith(fullHref + '/')
@@ -53,7 +47,7 @@ export function Sidebar() {
               key={key}
               href={fullHref}
               className={cn(
-                'group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-all duration-200 border-l-2',
+                'group flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-semibold transition-all duration-200 border-l-2',
                 isActive
                   ? 'border-l-primary bg-secondary/70 text-foreground border-t-transparent border-r-transparent border-b-transparent'
                   : 'border-l-transparent text-muted-foreground border-t-transparent border-r-transparent border-b-transparent hover:bg-secondary/60 hover:text-foreground'
