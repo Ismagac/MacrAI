@@ -17,6 +17,12 @@ export type FoodOption = {
   grasas_100g: number
   carbohidratos_100g: number
   fibra_100g?: number
+  macros_basis?: string | null
+  unit_name?: string | null
+  kcal_per_unit?: number | null
+  proteinas_per_unit?: number | null
+  grasas_per_unit?: number | null
+  carbohidratos_per_unit?: number | null
   source: string
 }
 
@@ -147,10 +153,24 @@ export function FoodOptionsCard({
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  const perUnit = selected?.macros_basis === 'per_unit'
+  const qtyNum = Number(qty) || 0
+
+  // Un alimento por unidad no se calcula por gramos: hacerlo daba macros falsos.
   const preview = selected
-    ? calcMacrosFromGrams(
-        { ...selected, source: selected.source as never, macros_basis: 'per_100g' },
-        Number(qty) || 0
+    ? calcMacros(
+        {
+          ...selected,
+          source: selected.source as never,
+          macros_basis: perUnit ? 'per_unit' : 'per_100g',
+          kcal_per_unit: selected.kcal_per_unit ?? undefined,
+          proteinas_per_unit: selected.proteinas_per_unit ?? undefined,
+          grasas_per_unit: selected.grasas_per_unit ?? undefined,
+          carbohidratos_per_unit: selected.carbohidratos_per_unit ?? undefined,
+          unit_name: selected.unit_name ?? undefined,
+        },
+        qtyNum,
+        perUnit ? qtyNum : undefined
       )
     : null
 
@@ -168,8 +188,9 @@ export function FoodOptionsCard({
         user_id: user.id,
         alimento_source: selected.source,
         nombre_alimento: selected.nombre,
-        cantidad_gr: Number(qty),
-        macros_basis: 'per_100g',
+        cantidad_gr: qtyNum,
+        cantidad_unit: perUnit ? qtyNum : undefined,
+        macros_basis: perUnit ? 'per_unit' : 'per_100g',
         kcal: preview.kcal,
         proteinas: preview.proteinas,
         grasas: preview.grasas,
@@ -204,7 +225,11 @@ export function FoodOptionsCard({
                 className="w-full rounded-lg border border-border px-2.5 py-2 text-left transition-colors hover:bg-accent"
               >
                 <span className="block truncate font-medium">{f.nombre}</span>
-                <span className="text-xs text-muted-foreground">{f.kcal_100g} kcal/100g</span>
+                <span className="text-xs text-muted-foreground">
+                  {f.macros_basis === 'per_unit'
+                    ? `${f.kcal_per_unit ?? 0} kcal/${f.unit_name || 'ud'}`
+                    : `${f.kcal_100g} kcal/100g`}
+                </span>
               </button>
             ))}
           </div>
@@ -225,7 +250,7 @@ export function FoodOptionsCard({
 
           <div className="flex gap-2">
             <label className="flex-1">
-              <span className="label-caps">Gramos</span>
+              <span className="label-caps">{perUnit ? selected.unit_name || 'Unidades' : 'Gramos'}</span>
               <input
                 type="number"
                 min="1"

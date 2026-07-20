@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { parseUserIntent, generateAgentReply, type AgentMessage } from '@/lib/api/ai'
 import { getUserLlmKey } from '@/lib/api/byok'
 import { searchOpenFoodFacts } from '@/lib/api/openfoodfacts'
+import { rankByMatch, bestMatch } from '@/lib/utils/foodMatch'
 import type { FoodItem } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -87,11 +88,8 @@ function findCatalogMatch<T extends CatalogRow>(catalog: T[], name: string): T |
   const needle = name.trim().toLowerCase()
   if (!needle) return undefined
 
-  return (
-    catalog.find((f) => f.nombre.toLowerCase() === needle) ??
-    catalog.find((f) => f.nombre.toLowerCase().includes(needle)) ??
-    catalog.find((f) => needle.includes(f.nombre.toLowerCase()))
-  )
+  const exact = catalog.find((f) => f.nombre.toLowerCase() === needle)
+  return exact ?? bestMatch(catalog, name)
 }
 
 const PATCH_LABELS: Record<string, string> = {
@@ -265,13 +263,11 @@ export async function POST(request: NextRequest) {
   else if (intent.type === 'log_food') {
     const query = intent.query
 
-    // El catálogo ya está en memoria: se filtra aquí en vez de volver a consultar.
-    const needle = query.trim().toLowerCase()
-    const userFoods: FoodOptionItem[] = userCatalog
-      .filter((f) => {
-        const name = String(f.nombre).toLowerCase()
-        return name.includes(needle) || needle.includes(name)
-      })
+    // El catálogo ya está en memoria: se empareja aquí, tolerando erratas y
+    // palabras de más. Se prueba con lo que extrajo el clasificador y, si no da
+    // nada, con el mensaje completo por si recortó de menos.
+    const matched = rankByMatch(userCatalog, query)
+    const userFoods: FoodOptionItem[] = (matched.length > 0 ? matched : rankByMatch(userCatalog, message))
       .slice(0, 5)
       .map((f) => ({ ...f, source: 'usuario' })) as FoodOptionItem[]
 
