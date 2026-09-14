@@ -89,7 +89,7 @@ export function ChatCore({ fullPage = false }: { fullPage?: boolean }) {
         pushAssistant({ content: data.reply, action: data.action, data: data.data })
 
         // Las mutaciones desde el chat deben verse al instante en el resto de la app.
-        if (data.action === 'catalog_changed' || data.action === 'log_changed') router.refresh()
+        if (data.action === 'catalog_changed' || data.action === 'log_changed' || data.action === 'day_reset') router.refresh()
 
         return data.reply
       } catch {
@@ -272,6 +272,7 @@ export function ChatCore({ fullPage = false }: { fullPage?: boolean }) {
                           foods={msg.data.foods as FoodOption[]}
                           defaultQty={msg.data.qty}
                           defaultMealType={msg.data.mealType}
+                          mealResolution={msg.data.mealResolution}
                           onLogged={() => router.refresh()}
                         />
                       )}

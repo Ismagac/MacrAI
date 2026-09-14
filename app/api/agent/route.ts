@@ -4,6 +4,8 @@ import { parseUserIntent, generateAgentReply, type AgentMessage } from '@/lib/ap
 import { getUserLlmKey } from '@/lib/api/byok'
 import { searchOpenFoodFacts } from '@/lib/api/openfoodfacts'
 import { rankByMatch, bestMatch } from '@/lib/utils/foodMatch'
+import { summarizeDay, resolveActiveMeal, describeSummary, MEAL_LABELS, MEAL_ORDER } from '@/lib/domain/day'
+import type { MealType } from '@/types'
 import type { FoodItem } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -58,6 +60,7 @@ export type AgentApiResponse = {
     | 'need_details'
     | 'catalog_changed'
     | 'log_changed'
+    | 'day_reset'
   data?: {
     foods?: FoodOptionItem[]
     qty?: number
@@ -67,6 +70,10 @@ export type AgentApiResponse = {
     days?: HistoryDayData[]
     catalog?: FoodOptionItem[]
     savedFood?: { nombre: string; kcal: number; basis: string; unitName?: string }
+    // Cómo se decidió la comida para un registro pendiente de confirmar:
+    // 'explicit' la dijo el usuario, 'context' la dio la regla de 90 minutos,
+    // 'none' hay que preguntarla con chips (una sola vez).
+    mealResolution?: 'explicit' | 'context' | 'none'
   }
 }
 
@@ -161,6 +168,33 @@ export async function POST(request: NextRequest) {
 
   const userCatalog = (catalogRows ?? []) as CatalogFood[]
   const catalogNames = userCatalog.map((f) => f.nombre)
+
+  // El diario de hoy y el corte de "nuevo día" alimentan la comida activa y los
+  // totales que acompañan a cada respuesta.
+  const [{ data: todayRows }, { data: profileRow }] = await Promise.all([
+    supabase
+      .from('consumos')
+      .select('id, nombre_alimento, tipo_comida, kcal, proteinas, carbohidratos, grasas, cantidad_gr, hora_insercion, created_at')
+      .eq('user_id', user.id)
+      .eq('fecha', today)
+      .order('hora_insercion', { ascending: false }),
+    supabase.from('profiles').select('chat_day_reset_at').eq('id', user.id).maybeSingle(),
+  ])
+
+  const todayEntries = (todayRows ?? []) as Array<{
+    id: string
+    nombre_alimento: string
+    tipo_comida: MealType
+    kcal: number
+    proteinas: number
+    carbohidratos: number
+    grasas: number
+    cantidad_gr: number
+    hora_insercion: string | null
+    created_at: string | null
+  }>
+  const dayResetAt = (profileRow?.chat_day_reset_at as string | null | undefined) ?? null
+  const activeMeal = resolveActiveMeal(todayEntries, dayResetAt)
 
   const intent = await parseUserIntent(message, userKey, catalogNames)
 
@@ -294,14 +328,23 @@ export async function POST(request: NextRequest) {
       actionType = 'need_details'
       actionData = { query, qty: intent.qty, mealType: intent.mealType }
     } else {
+      // Prioridad (spec §4): lo que diga el mensaje > comida abierta hace <90 min > preguntar una vez.
+      const explicitMeal = MEAL_ORDER.includes(intent.mealType as MealType) ? (intent.mealType as MealType) : undefined
+      const mealType = explicitMeal ?? activeMeal.meal ?? undefined
+      const mealResolution: NonNullable<AgentApiResponse['data']>['mealResolution'] = explicitMeal
+        ? 'explicit'
+        : activeMeal.meal
+          ? 'context'
+          : 'none'
+
       context =
         `El usuario quiere registrar "${query}"` +
-        (intent.qty ? ` (${intent.qty}g)` : '') +
-        (intent.mealType ? ` en ${intent.mealType}` : '') +
-        `. Encontré ${foods.length} opciones.`
+        (intent.qty ? ` (${intent.qty})` : '') +
+        (mealType ? ` en ${MEAL_LABELS[mealType]}${mealResolution === 'context' ? ' (asumido por contexto)' : ''}` : ' (sin comida asignada: la elegirá en la tarjeta)') +
+        `. Encontré ${foods.length} opciones; se confirman en la tarjeta. Responde en una frase, sin repetir la lista.`
 
       actionType = 'food_options'
-      actionData = { foods, qty: intent.qty, mealType: intent.mealType, query }
+      actionData = { foods, qty: intent.qty, mealType, mealResolution, query }
     }
   }
 
@@ -372,9 +415,36 @@ export async function POST(request: NextRequest) {
           .eq('id', target.id)
           .eq('user_id', user.id)
 
+        // Spec §5.1: la corrección actualiza el catálogo, no sólo la entrada.
+        // Y las entradas de hoy de ese alimento se recalculan con el perfil corregido.
+        let recomputed = 0
+        if (!error) {
+          const merged = { ...target, ...patch } as Record<string, number | string | null>
+          const affected = todayEntries.filter((e) => bestMatch([target], e.nombre_alimento))
+          for (const e of affected) {
+            const qty = Number(e.cantidad_gr) || 0
+            const factor = isPerUnit ? qty : qty / 100
+            const pick = (base: string, unit: string) => Number(merged[isPerUnit ? unit : base] ?? 0)
+            const { error: upErr } = await supabase
+              .from('consumos')
+              .update({
+                nombre_alimento: intent.nuevo_nombre ?? e.nombre_alimento,
+                kcal: Math.round(pick('kcal_100g', 'kcal_per_unit') * factor),
+                proteinas: Math.round(pick('proteinas_100g', 'proteinas_per_unit') * factor * 10) / 10,
+                carbohidratos: Math.round(pick('carbohidratos_100g', 'carbohidratos_per_unit') * factor * 10) / 10,
+                grasas: Math.round(pick('grasas_100g', 'grasas_per_unit') * factor * 10) / 10,
+              })
+              .eq('id', e.id)
+              .eq('user_id', user.id)
+            if (!upErr) recomputed++
+          }
+        }
+
         context = error
           ? `Fallo al actualizar "${target.nombre}". Discúlpate brevemente.`
-          : `Actualizado "${target.nombre}" en el catálogo: ${describePatch(patch)}. Confírmaselo en una frase.`
+          : `Actualizado "${target.nombre}" en el catálogo: ${describePatch(patch)}.` +
+            (recomputed > 0 ? ` Recalculadas ${recomputed} entradas de hoy con el perfil corregido.` : '') +
+            ' Confírmaselo en una frase diciendo qué cambió.'
         if (!error) actionType = 'catalog_changed'
       }
     }
@@ -425,17 +495,20 @@ export async function POST(request: NextRequest) {
 
   // ── update_log ──
   else if (intent.type === 'update_log') {
-    const { data: matches } = await supabase
+    // Spec §8: sin alimento nombrado, la corrección apunta a la última entrada.
+    let q = supabase
       .from('consumos')
       .select('id, nombre_alimento, cantidad_gr, kcal, proteinas, grasas, carbohidratos, fibra, macros_basis')
       .eq('user_id', user.id)
       .eq('fecha', today)
-      .ilike('nombre_alimento', `%${intent.query}%`)
-      .order('created_at', { ascending: false })
+    if (intent.query) q = q.ilike('nombre_alimento', `%${intent.query}%`)
+    const { data: matches } = await q.order('hora_insercion', { ascending: false }).limit(1)
 
     const target = matches?.[0]
     if (!target) {
-      context = `No encontré "${intent.query}" en el diario de hoy. Díselo al usuario.`
+      context = intent.query
+        ? `No encontré "${intent.query}" en el diario de hoy. Díselo al usuario.`
+        : 'No hay ningún registro hoy que corregir. Díselo al usuario.'
     } else {
       // Las macros guardadas corresponden a la cantidad antigua: se reescalan.
       const oldQty = Number(target.cantidad_gr) || 0
@@ -462,6 +535,45 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // ── move_log ──
+  else if (intent.type === 'move_log') {
+    const dest = MEAL_ORDER.includes(intent.mealType as MealType) ? (intent.mealType as MealType) : null
+    const target = intent.query
+      ? todayEntries.find((e) => bestMatch([{ nombre: e.nombre_alimento }], intent.query!))
+      : todayEntries[0]
+
+    if (!dest) {
+      context = `El usuario quiere mover un registro a "${intent.mealType}" pero no reconozco esa comida. Pregúntale cuál.`
+    } else if (!target) {
+      context = 'No encontré ese registro en el diario de hoy. Díselo al usuario.'
+    } else {
+      // Se mueve, nunca se duplica (spec §4).
+      const { error } = await supabase
+        .from('consumos')
+        .update({ tipo_comida: dest })
+        .eq('id', target.id)
+        .eq('user_id', user.id)
+
+      context = error
+        ? `No pude mover "${target.nombre_alimento}". Discúlpate brevemente.`
+        : `Movido "${target.nombre_alimento}" de ${MEAL_LABELS[target.tipo_comida]} a ${MEAL_LABELS[dest]}. Confírmaselo en una frase.`
+      if (!error) actionType = 'log_changed'
+    }
+  }
+
+  // ── new_day ──
+  else if (intent.type === 'new_day') {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ chat_day_reset_at: new Date().toISOString() })
+      .eq('id', user.id)
+
+    context = error
+      ? 'No pude marcar el nuevo día. Discúlpate brevemente.'
+      : 'Marcado un nuevo día: lo siguiente que registre irá al desayuno salvo que diga otra cosa. Confírmaselo en una frase.'
+    if (!error) actionType = 'day_reset'
+  }
+
   // ── edit_log ──
   else if (intent.type === 'edit_log') {
     context = 'El usuario quiere editar o borrar un registro del diario de hoy.'
@@ -479,7 +591,11 @@ export async function POST(request: NextRequest) {
         `${userCatalog.length > 30 ? ', …' : ''}.`
       : 'El catálogo personal del usuario está vacío.'
 
-  const fullContext = [baseContext, context].filter(Boolean).join('\n')
+  const daySummary = describeSummary(summarizeDay(todayEntries))
+  const activeMealNote =
+    activeMeal.meal ? `Comida activa ahora mismo: ${MEAL_LABELS[activeMeal.meal]}.` : 'No hay comida activa.'
+
+  const fullContext = [baseContext, daySummary, activeMealNote, context].filter(Boolean).join('\n')
 
   const reply = await generateAgentReply(message, fullContext, safeHistory, userKey)
 

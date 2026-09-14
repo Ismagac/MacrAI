@@ -354,7 +354,9 @@ export type UserIntent =
     }
   | { type: "delete_catalog_food"; nombre: string }
   | { type: "delete_log"; query?: string; mealType?: string }
-  | { type: "update_log"; query: string; qty: number }
+  | { type: "update_log"; query?: string; qty: number }
+  | { type: "move_log"; query?: string; mealType: string }
+  | { type: "new_day" }
   | { type: "check_macros" }
   | { type: "history" }
   | { type: "catalog" }
@@ -369,12 +371,17 @@ function buildIntentPrompt(catalogNames: string[]): string {
 
   return `Eres MacrAI. Clasifica el mensaje del usuario. Devuelve SOLO JSON válido.
 Tipos válidos:
-- "log_food": registrar un alimento en el diario. Campos: query (string), qty (número, opcional), mealType (desayuno|almuerzo|comida|merienda|cena|snack|otro, opcional)
+- "log_food": registrar un alimento en el diario. Campos: query (string), qty (número, opcional), mealType (opcional)
+  Valores de mealType: desayuno | almuerzo (= "media mañana") | comida | merienda | cena | snack (= "post-cena", "después de cenar") | otro
+  Si el usuario NO menciona la comida, NO inventes mealType: déjalo fuera.
+  La voz llega sucia ("leche deslatada", "calabasta"): pon en query tu mejor interpretación del alimento, sin preguntar.
 - "add_catalog_food": crear alimento nuevo en el catálogo con macros completos. Campos: nombre, macros_basis("per_100g"|"per_unit"), unit_name(opcional), kcal, proteinas, carbohidratos, grasas, fibra(opcional)
 - "update_catalog_food": corregir macros o nombre de un alimento YA existente en el catálogo. Campos: nombre (el actual), y los que cambien: kcal, proteinas, carbohidratos, grasas, fibra, nuevo_nombre
 - "delete_catalog_food": eliminar un alimento del catálogo. Campo: nombre
 - "delete_log": borrar un registro del diario de hoy. Campos: query (nombre del alimento, opcional), mealType (opcional)
-- "update_log": cambiar la cantidad de un registro de hoy. Campos: query (nombre), qty (nueva cantidad)
+- "update_log": cambiar la cantidad de un registro de hoy. Campos: query (nombre, opcional: si no lo dice es el último registro), qty (nueva cantidad)
+- "move_log": mover un registro a otra comida ("esto era de la comida"). Campos: query (opcional, por defecto el último), mealType
+- "new_day": el usuario dice que empieza un nuevo día ("es un nuevo día", "nuevo día")
 - "check_macros": ver macros/calorías de hoy
 - "history": ver historial semanal
 - "catalog": ver catálogo personal de alimentos
@@ -391,6 +398,12 @@ Ejemplos:
 "borra el yogur de hoy" → {"type":"delete_log","query":"yogur"}
 "quita lo que registré en la cena" → {"type":"delete_log","mealType":"cena"}
 "el arroz eran 200g no 100" → {"type":"update_log","query":"arroz","qty":200}
+"no, veinte, no doscientos" → {"type":"update_log","qty":20}
+"esto era de la comida" → {"type":"move_log","mealType":"comida"}
+"el yogur era de media mañana" → {"type":"move_log","query":"yogur","mealType":"almuerzo"}
+"es un nuevo día, eh" → {"type":"new_day"}
+"añade 50 de pan" → {"type":"log_food","query":"pan","qty":50}
+"a la media mañana una manzana" → {"type":"log_food","query":"manzana","qty":1,"mealType":"almuerzo"}
 "¿cuánto llevo hoy?" → {"type":"check_macros"}
 "historial semanal" → {"type":"history"}
 "mi catálogo" → {"type":"catalog"}
@@ -509,10 +522,24 @@ export async function parseUserIntent(
 
       if (type === "update_log") {
         const qty = coerceNumber(obj.qty);
-        if (typeof obj.query === "string" && qty !== undefined) {
-          return { type: "update_log", query: obj.query, qty };
+        if (qty !== undefined) {
+          return {
+            type: "update_log",
+            query: typeof obj.query === "string" ? obj.query : undefined,
+            qty,
+          };
         }
       }
+
+      if (type === "move_log" && typeof obj.mealType === "string") {
+        return {
+          type: "move_log",
+          query: typeof obj.query === "string" ? obj.query : undefined,
+          mealType: obj.mealType,
+        };
+      }
+
+      if (type === "new_day") return { type: "new_day" };
 
       if (type === "add_catalog_food") {
         const kcal = coerceNumber(obj.kcal);
@@ -563,9 +590,11 @@ export async function generateAgentReply(
   userKey?: UserLlmKey | null
 ): Promise<string> {
   const systemPrompt =
-    `Eres MacrAI, el asistente personal de nutrición integrado en la app.\n` +
-    `Eres conciso, motivador y directo. Responde siempre en español. Máximo 3 frases.\n` +
-    `No expliques lo que vas a hacer, hazlo.\n` +
+    `Eres MacrAI, el asistente de registro de macros integrado en la app.\n` +
+    `Conciso y factual. Responde siempre en español. Máximo 3 frases.\n` +
+    `No expliques lo que vas a hacer, hazlo. Cuando algo cambie, di exactamente qué cambió.\n` +
+    `PROHIBIDO: comentarios valorativos no pedidos ("un día muy calórico", "¡bien hecho!", ` +
+    `"cuidado con..."). Sólo datos y, si te preguntan, respuesta.\n` +
     `REGLA CRÍTICA: sobre el catálogo, el diario o los macros del usuario, usa EXCLUSIVAMENTE ` +
     `los datos del contexto. Nunca afirmes que algo está vacío si el contexto no lo dice. ` +
     `Si el contexto no trae el dato, di que no lo tienes a mano.\n` +

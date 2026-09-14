@@ -7,6 +7,8 @@ import type { AgentApiResponse } from '@/app/api/agent/route'
 import type { MacroDetectionResult } from '@/lib/api/ai'
 import type { FoodItem, MealType } from '@/types'
 import { Check } from 'lucide-react'
+import { MEAL_LABELS, MEAL_ORDER } from '@/lib/domain/day'
+import type { LogEntryResponse } from '@/app/api/agent/log/route'
 import { cn } from '@/lib/utils/cn'
 
 export type FoodOption = {
@@ -26,7 +28,6 @@ export type FoodOption = {
   source: string
 }
 
-const MEAL_OPTIONS: MealType[] = ['desayuno', 'almuerzo', 'comida', 'merienda', 'cena', 'snack', 'otro']
 
 const fieldClass =
   'w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary'
@@ -67,6 +68,132 @@ function MacroGrid({
           <p className={cn('metric text-lg', cls)}>{value ?? '—'}</p>
         </div>
       ))}
+    </div>
+  )
+}
+
+
+// Chips en vez de select: la spec pide elegir comida con un toque, nunca escribiendo.
+function MealChips({ value, onChange }: { value: MealType | null; onChange: (m: MealType) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {MEAL_ORDER.filter((m) => m !== 'otro').map((m) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          className={cn(
+            'rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
+            value === m
+              ? 'border-primary bg-primary text-primary-foreground'
+              : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
+          )}
+        >
+          {MEAL_LABELS[m]}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+async function logEntry(
+  food: Record<string, unknown>,
+  qty: number,
+  mealType: MealType
+): Promise<LogEntryResponse | null> {
+  const res = await fetch('/api/agent/log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ food, qty, mealType }),
+  })
+  if (!res.ok) return null
+  return (await res.json()) as LogEntryResponse
+}
+
+function ConfidenceDot({ level }: { level: LogEntryResponse['entry']['confidence'] }) {
+  const cls = level === 'alta' ? 'bg-primary' : level === 'media' ? 'bg-[color:var(--macro-fat)]' : 'bg-destructive'
+  return <span className={cn('inline-block h-2 w-2 rounded-full', cls)} title={`Confianza ${level}`} />
+}
+
+// Respuesta tras cada registro (spec §10): qué se añadió, total de esa comida,
+// total del día por comidas, y progreso con énfasis en la proteína.
+export function TotalsCard({ result }: { result: LogEntryResponse }) {
+  const { entry, mealTotal, day, goal } = result
+  const goalKcal = goal?.kcal
+  const goalProt = goal?.proteinas
+  const pct = (v: number, g?: number) => (g && g > 0 ? Math.min(Math.round((v / g) * 100), 100) : null)
+
+  return (
+    <div className="mt-2 space-y-3 rounded-xl border border-primary/30 bg-card p-3 text-sm">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Check className="h-4 w-4 text-brand" />
+          <span className="font-semibold">
+            {entry.nombre} · {entry.qty} {entry.unit}
+          </span>
+          <ConfidenceDot level={entry.confidence} />
+        </div>
+        <span className="metric shrink-0 text-sm">
+          {entry.kcal} <span className="text-xs font-normal text-muted-foreground">kcal</span>
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        P {entry.proteinas} · C {entry.carbohidratos} · G {entry.grasas}
+        {entry.confidence !== 'alta' && ` · fuente: ${entry.source}`}
+      </p>
+
+      {mealTotal && (
+        <div className="flex items-baseline justify-between border-t border-border pt-2">
+          <span className="label-caps">{mealTotal.label}</span>
+          <span className="metric text-sm">
+            {mealTotal.kcal} kcal
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              P {mealTotal.proteinas} · C {mealTotal.carbohidratos} · G {mealTotal.grasas}
+            </span>
+          </span>
+        </div>
+      )}
+
+      <div className="border-t border-border pt-2">
+        <div className="flex items-baseline justify-between">
+          <span className="label-caps">Hoy</span>
+          <span className="metric text-base">
+            {day.total.kcal}
+            {goalKcal ? <span className="text-xs font-normal text-muted-foreground"> / {goalKcal}</span> : null}
+            <span className="text-xs font-normal text-muted-foreground"> kcal</span>
+          </span>
+        </div>
+        {day.byMeal.length >= 3 && (
+          <div className="mt-1.5 space-y-0.5">
+            {day.byMeal.map((m) => (
+              <div key={m.meal} className="flex justify-between text-xs text-muted-foreground">
+                <span>{m.label}</span>
+                <span className="tabular-nums">{m.kcal} kcal</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-2 space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="macro-protein font-semibold">Proteína</span>
+            <span className="metric text-xs">
+              {day.total.proteinas}
+              {goalProt ? <span className="font-normal text-muted-foreground"> / {goalProt} g</span> : ' g'}
+            </span>
+          </div>
+          <div className="macro-track h-1.5 w-full rounded-full">
+            <div
+              className="macro-bg-protein h-1.5 rounded-full"
+              style={{ width: `${pct(day.total.proteinas, goalProt) ?? 0}%` }}
+            />
+          </div>
+          {goalKcal && (
+            <div className="macro-track h-1 w-full rounded-full">
+              <div className="h-1 rounded-full bg-primary" style={{ width: `${pct(day.total.kcal, goalKcal) ?? 0}%` }} />
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -140,18 +267,23 @@ export function FoodOptionsCard({
   foods,
   defaultQty,
   defaultMealType,
+  mealResolution = 'none',
   onLogged,
 }: {
   foods: FoodOption[]
   defaultQty?: number
   defaultMealType?: string
+  mealResolution?: 'explicit' | 'context' | 'none'
   onLogged: () => void
 }) {
   const [selected, setSelected] = useState<FoodOption | null>(foods.length === 1 ? foods[0] : null)
   const [qty, setQty] = useState(String(defaultQty ?? 100))
-  const [mealType, setMealType] = useState<MealType>((defaultMealType as MealType) ?? 'otro')
+  const [mealType, setMealType] = useState<MealType | null>(
+    defaultMealType && MEAL_ORDER.includes(defaultMealType as MealType) ? (defaultMealType as MealType) : null
+  )
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const [result, setResult] = useState<LogEntryResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const perUnit = selected?.macros_basis === 'per_unit'
   const qtyNum = Number(qty) || 0
@@ -175,42 +307,23 @@ export function FoodOptionsCard({
     : null
 
   async function handleConfirm() {
-    if (!selected || !qty) return
+    if (!selected || qtyNum <= 0 || !mealType) return
     setSaving(true)
+    setError(null)
     try {
-      const supabase = createClient()
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user || !preview) return
-
-      const { error } = await supabase.from('consumos').insert({
-        user_id: user.id,
-        alimento_source: selected.source,
-        nombre_alimento: selected.nombre,
-        cantidad_gr: qtyNum,
-        cantidad_unit: perUnit ? qtyNum : undefined,
-        macros_basis: perUnit ? 'per_unit' : 'per_100g',
-        kcal: preview.kcal,
-        proteinas: preview.proteinas,
-        grasas: preview.grasas,
-        carbohidratos: preview.carbohidratos,
-        fibra: preview.fibra,
-        fecha: new Date().toISOString().split('T')[0],
-        tipo_comida: mealType,
-        numero_comida: 1,
-      })
-
-      if (!error) {
-        setSaved(true)
-        onLogged()
+      const res = await logEntry(selected as unknown as Record<string, unknown>, qtyNum, mealType)
+      if (!res) {
+        setError('No pude registrarlo. Inténtalo de nuevo.')
+        return
       }
+      setResult(res)
+      onLogged()
     } finally {
       setSaving(false)
     }
   }
 
-  if (saved) return <Done>Registrado</Done>
+  if (result) return <TotalsCard result={result} />
 
   return (
     <div className="mt-2 space-y-2.5 rounded-xl border border-border bg-card p-3 text-sm">
@@ -260,20 +373,19 @@ export function FoodOptionsCard({
                 className={cn(fieldClass, 'mt-0.5')}
               />
             </label>
-            <label className="flex-1">
-              <span className="label-caps">Comida</span>
-              <select
-                value={mealType}
-                onChange={(e) => setMealType(e.target.value as MealType)}
-                className={cn(fieldClass, 'mt-0.5 capitalize')}
-              >
-                {MEAL_OPTIONS.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </label>
+          </div>
+
+          <div>
+            <p className="label-caps mb-1.5">
+              Comida
+              {mealResolution === 'context' && mealType && (
+                <span className="ml-1 normal-case tracking-normal text-muted-foreground">· asumida: {MEAL_LABELS[mealType]}</span>
+              )}
+              {mealResolution === 'none' && !mealType && (
+                <span className="ml-1 normal-case tracking-normal text-muted-foreground">· ¿en cuál?</span>
+              )}
+            </p>
+            <MealChips value={mealType} onChange={setMealType} />
           </div>
 
           {preview && Number(qty) > 0 && (
@@ -282,9 +394,11 @@ export function FoodOptionsCard({
             </p>
           )}
 
+          {error && <p className="text-xs text-destructive">{error}</p>}
+
           <button
             onClick={handleConfirm}
-            disabled={saving || !qty}
+            disabled={saving || qtyNum <= 0 || !mealType}
             className="w-full rounded-lg bg-primary py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {saving ? 'Guardando…' : 'Confirmar'}
@@ -305,9 +419,10 @@ export function DetectedFoodCard({
   const isPerUnit = detected.basis === 'per_unit'
   const [nombre, setNombre] = useState(detected.foodName ?? 'Nuevo alimento')
   const [qty, setQty] = useState(isPerUnit ? '1' : '100')
-  const [mealType, setMealType] = useState<MealType>('otro')
+  const [mealType, setMealType] = useState<MealType | null>(null)
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState<null | 'catalog' | 'logged'>(null)
+  const [saved, setSaved] = useState<null | 'catalog'>(null)
+  const [result, setResult] = useState<LogEntryResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const food: FoodItem = {
@@ -362,44 +477,32 @@ export function DetectedFoodCard({
         return
       }
 
-      if (!alsoLog || !preview) {
+      if (!alsoLog || !preview || !mealType) {
         setSaved('catalog')
         return
       }
 
-      const { error: logError } = await supabase.from('consumos').insert({
-        user_id: user.id,
-        alimento_source: 'usuario',
-        nombre_alimento: nombre.trim(),
-        cantidad_gr: qtyNum,
-        cantidad_unit: isPerUnit ? qtyNum : undefined,
-        macros_basis: food.macros_basis,
-        kcal: preview.kcal,
-        proteinas: preview.proteinas,
-        grasas: preview.grasas,
-        carbohidratos: preview.carbohidratos,
-        fibra: preview.fibra,
-        fecha: new Date().toISOString().split('T')[0],
-        tipo_comida: mealType,
-        numero_comida: 1,
-      })
+      const res = await logEntry(
+        { ...food, nombre: nombre.trim(), source: 'etiqueta' } as unknown as Record<string, unknown>,
+        qtyNum,
+        mealType
+      )
 
-      if (logError) {
+      if (!res) {
         setError('Guardado en el catálogo, pero no pude registrarlo en el diario.')
         setSaved('catalog')
         return
       }
 
-      setSaved('logged')
+      setResult(res)
       onLogged()
     } finally {
       setSaving(false)
     }
   }
 
-  if (saved) {
-    return <Done>{saved === 'logged' ? 'Guardado y registrado' : 'Guardado en tu catálogo'}</Done>
-  }
+  if (result) return <TotalsCard result={result} />
+  if (saved) return <Done>Guardado en tu catálogo</Done>
 
   return (
     <div className="mt-2 space-y-2.5 rounded-xl border border-border bg-card p-3 text-sm">
@@ -433,20 +536,11 @@ export function DetectedFoodCard({
             className={cn(fieldClass, 'mt-0.5')}
           />
         </label>
-        <label className="flex-1">
-          <span className="label-caps">Comida</span>
-          <select
-            value={mealType}
-            onChange={(e) => setMealType(e.target.value as MealType)}
-            className={cn(fieldClass, 'mt-0.5 capitalize')}
-          >
-            {MEAL_OPTIONS.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        </label>
+      </div>
+
+      <div>
+        <p className="label-caps mb-1.5">Comida{!mealType && <span className="ml-1 normal-case tracking-normal text-muted-foreground">· ¿en cuál?</span>}</p>
+        <MealChips value={mealType} onChange={setMealType} />
       </div>
 
       {preview && (
@@ -460,7 +554,7 @@ export function DetectedFoodCard({
       <div className="flex gap-2">
         <button
           onClick={() => save(true)}
-          disabled={saving || !nombre.trim() || qtyNum <= 0}
+          disabled={saving || !nombre.trim() || qtyNum <= 0 || !mealType}
           className="flex-1 rounded-lg bg-primary py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           {saving ? 'Guardando…' : 'Guardar y registrar'}
