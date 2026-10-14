@@ -150,11 +150,13 @@ class AssistantTest {
 
     @Test fun weighInOpensTheDayAndDoesNotConcludeWithFewDays() = runTest {
         val start = StoreState(catalog = CATALOG, openDay = WED, weighIns = listOf(WeighIn(WED, 93.0)))
-        val (bot, _) = assistant(mapOf("92,6" to """{"acciones":[{"tipo":"peso","kg":92.6}]}"""), start)
+        val store = InMemoryMacroStore(start)
+        val bot = MacroAssistant(store, ScriptedModel(mapOf("92,6" to """{"acciones":[{"tipo":"peso","kg":92.6}]}""")), "DOC")
         val reply = bot.handle(UserMessage("92,6", at(THU, 8, 0))).toMarkdown()
         assertTrue("Peso del jueves: 92,6 kg" in reply, reply)
         assertTrue("-0,4 kg desde el miércoles." in reply, reply)
         assertTrue("Con menos de 7 días" in reply)
+        assertEquals(139.0, store.state().user.proteinMinimum)
     }
 
     @Test fun onDeviceFailureFallsBackToCloudAndAnalysisGoesToCloud() = runTest {

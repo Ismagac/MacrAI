@@ -91,7 +91,7 @@ private val EXAMPLES = listOf(
 
 @Composable
 fun ChatScreen(app: MacrAIApplication, modifier: Modifier = Modifier) {
-    val vm = viewModel { ChatViewModel(app.assistant) }
+    val vm = viewModel { ChatViewModel(app.assistant) { app.aiConfigured } }
     val state by app.store.flow.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
 
@@ -253,7 +253,7 @@ private fun Composer(onSend: (String, Photo?) -> Unit, enabled: Boolean) {
         speech.start(
             onPartial = { text = it },
             onResult = { listening = false; text = it },
-            onError = { listening = false },
+            onFailure = { listening = false },
         )
     }
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->

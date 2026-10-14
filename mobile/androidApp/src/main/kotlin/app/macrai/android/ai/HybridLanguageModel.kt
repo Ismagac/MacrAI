@@ -1,6 +1,7 @@
 package app.macrai.android.ai
 
 import android.graphics.BitmapFactory
+import android.util.Log
 import app.macrai.core.LanguageModel
 import app.macrai.core.ModelRequest
 import app.macrai.core.ModelTier
@@ -9,6 +10,7 @@ import com.google.firebase.ai.InferenceMode
 import com.google.firebase.ai.OnDeviceConfig
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.GenerativeBackend
+import com.google.firebase.ai.type.PublicPreviewAPI
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
 
@@ -20,33 +22,39 @@ import com.google.firebase.ai.type.generationConfig
 // - Dictados largos, fotos sin OCR y análisis: solo nube, porque el modelo local tiene
 //   ventana corta, una sola imagen y salida limitada.
 //
-// La API híbrida es experimental (abril de 2026): los nombres de OnDeviceConfig e
-// InferenceMode siguen la referencia de Firebase y pueden moverse entre versiones beta.
-// Toda la dependencia queda en este archivo.
+// La API híbrida es experimental (abril de 2026) y va detrás de @PublicPreviewAPI: sus
+// nombres pueden moverse entre versiones beta. Toda la dependencia queda en este archivo.
 
-/** Modelos de la nube (Gemini Developer API, con capa gratuita). */
-private const val EXTRACTION_MODEL = "gemini-3.1-flash-lite"
-private const val REASONING_MODEL = "gemini-3.5-flash"
+private const val TAG = "MacrAI-IA"
 
+/** Modelos de la nube (Gemini Developer API). Si Firebase responde "model not found", se cambian aquí. */
+private const val EXTRACTION_MODEL = "gemini-3.5-flash-lite"
+private const val REASONING_MODEL = "gemini-3.6-flash"
+
+@OptIn(PublicPreviewAPI::class)
 class HybridLanguageModel : LanguageModel {
-    private val ai = Firebase.ai(backend = GenerativeBackend.googleAI())
+    // Perezoso: sin google-services.json no hay FirebaseApp y crearlo aquí cerraría la app.
+    private val ai by lazy { Firebase.ai(backend = GenerativeBackend.googleAI()) }
 
-    private val extractionConfig = generationConfig {
-        temperature = 0.1f
-        // El JSON de un mensaje normal cabe de sobra; un dictado va a la nube.
-        maxOutputTokens = 800
+    private val onDeviceFirst by lazy {
+        // Sin límite de salida propio: el del modelo local es más corto y lo fija AICore.
+        ai.generativeModel(
+            modelName = EXTRACTION_MODEL,
+            generationConfig = generationConfig { temperature = 0.1f },
+            onDeviceConfig = OnDeviceConfig(mode = InferenceMode.PREFER_ON_DEVICE),
+        )
     }
 
-    private val onDeviceFirst = ai.generativeModel(
-        modelName = EXTRACTION_MODEL,
-        generationConfig = extractionConfig,
-        onDeviceConfig = OnDeviceConfig(mode = InferenceMode.PREFER_ON_DEVICE),
-    )
-
-    private val cloudExtraction = ai.generativeModel(
-        modelName = EXTRACTION_MODEL,
-        generationConfig = extractionConfig,
-    )
+    private val cloudExtraction by lazy {
+        ai.generativeModel(
+            modelName = EXTRACTION_MODEL,
+            generationConfig = generationConfig {
+                temperature = 0.1f
+                // Un dictado de un día entero cabe de sobra.
+                maxOutputTokens = 2048
+            },
+        )
+    }
 
     override suspend fun generate(request: ModelRequest): String {
         val system = request.system
@@ -63,6 +71,12 @@ class HybridLanguageModel : LanguageModel {
             request.image?.let { bytes -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { image(it) } }
             text(request.prompt)
         }
-        return model.generateContent(prompt).text.orEmpty()
+        // El motor convierte cualquier fallo en "no he podido interpretarlo"; aquí queda la causa.
+        return try {
+            model.generateContent(prompt).text.orEmpty()
+        } catch (e: Exception) {
+            Log.e(TAG, "Fallo del modelo (${request.tier}, sistema=${system != null})", e)
+            throw e
+        }
     }
 }

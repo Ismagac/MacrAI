@@ -50,15 +50,19 @@ fun WeekScreen(app: MacrAIApplication, modifier: Modifier = Modifier) {
 
     fun sync() = scope.launch {
         val from = today.minus(DatePeriod(days = 13))
-        val burns = app.health.expenditures(from, today)
-        val weights = app.health.morningWeighIns(from, today)
-        app.store.update { s ->
-            s.copy(
-                expenditures = s.expenditures.filterNot { e -> burns.any { it.day == e.day } } + burns,
-                weighIns = s.weighIns.filterNot { w -> weights.any { it.day == w.day } } + weights,
-            )
-        }
-        status = "Importados ${burns.size} días de gasto y ${weights.size} pesajes de Health Connect."
+        runCatching {
+            val burns = app.health.expenditures(from, today)
+            val weights = app.health.morningWeighIns(from, today)
+            app.store.update { s ->
+                s.copy(
+                    expenditures = s.expenditures.filterNot { e -> burns.any { it.day == e.day } } + burns,
+                    weighIns = s.weighIns.filterNot { w -> weights.any { it.day == w.day } } + weights,
+                    // El último pesaje fija el mínimo de proteína (1,5 g/kg).
+                    user = weights.maxByOrNull { it.day }?.let { s.user.copy(weightKg = it.kg) } ?: s.user,
+                )
+            }
+            "Importados ${burns.size} días de gasto y ${weights.size} pesajes de Health Connect."
+        }.onSuccess { status = it }.onFailure { status = "No he podido leer Health Connect: ${it.message}" }
     }
 
     val permissions = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->

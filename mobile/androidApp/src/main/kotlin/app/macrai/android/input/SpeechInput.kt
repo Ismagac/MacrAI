@@ -16,7 +16,7 @@ class SpeechInput(context: Context) {
 
     val available: Boolean = SpeechRecognizer.isRecognitionAvailable(context)
 
-    fun start(onPartial: (String) -> Unit, onResult: (String) -> Unit, onError: () -> Unit) {
+    fun start(onPartial: (String) -> Unit, onResult: (String) -> Unit, onFailure: () -> Unit) {
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onPartialResults(partialResults: Bundle) {
                 partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let(onPartial)
@@ -24,10 +24,10 @@ class SpeechInput(context: Context) {
 
             override fun onResults(results: Bundle) {
                 val text = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                if (text.isNullOrBlank()) onError() else onResult(text)
+                if (text.isNullOrBlank()) onFailure() else onResult(text)
             }
 
-            override fun onError(error: Int) = onError()
+            override fun onError(error: Int) = onFailure()
             override fun onReadyForSpeech(params: Bundle?) = Unit
             override fun onBeginningOfSpeech() = Unit
             override fun onRmsChanged(rmsdB: Float) = Unit

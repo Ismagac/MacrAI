@@ -236,6 +236,8 @@ El documento describe una libreta que calcula, no una app de gimnasio. La imagen
 
 ### Fase 1 — Primera build en un móvil real (1-2 semanas)
 
+Pasos para compilar y probar: [`mobile/README.md`](../mobile/README.md).
+
 - Crear el proyecto de Firebase, activar AI Logic con la Gemini Developer API y App Check, y descargar `google-services.json`.
 - Compilar en Android Studio. El entorno donde se escribió esta rama no tiene acceso al Maven de Google, así que el módulo Android **todavía no se ha compilado**: hay que esperar algún ajuste de imports, sobre todo en la API híbrida experimental.
 - **Evaluación de extracción:** convertir los ejemplos del documento (y del historial real) en un juego de ~100 mensajes con su JSON esperado, y medir Nano frente a la nube. Si Nano falla en algo concreto, se ajustan los ejemplos del prompt o esa tarea pasa a la nube.

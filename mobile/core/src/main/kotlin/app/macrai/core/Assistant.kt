@@ -433,7 +433,12 @@ class MacroAssistant(
         val day = resolveLogDay(turn.now, state.openDay, state.lastEntry?.loggedAt, DaySignal.MORNING_WEIGH_IN).day
         val previous = state.weighIns.filter { it.day < day }.maxByOrNull { it.day }
         val updated = store.update { s ->
-            s.copy(weighIns = s.weighIns.filterNot { it.day == day } + WeighIn(day, action.kg), openDay = maxOfNullable(s.openDay, day))
+            s.copy(
+                weighIns = s.weighIns.filterNot { it.day == day } + WeighIn(day, action.kg),
+                openDay = maxOfNullable(s.openDay, day),
+                // El mínimo de proteína (§15) sigue al peso real.
+                user = s.user.copy(weightKg = action.kg),
+            )
         }
 
         val recent = updated.weighIns.filter { it.day > day.minus(DatePeriod(days = 7)) }.sortedBy { it.day }

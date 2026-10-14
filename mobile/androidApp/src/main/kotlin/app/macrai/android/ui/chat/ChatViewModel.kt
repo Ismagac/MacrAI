@@ -9,6 +9,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.macrai.android.input.Photo
 import app.macrai.core.AssistantReply
+import app.macrai.core.ReplyBlock
 import app.macrai.core.MacroAssistant
 import app.macrai.core.UserMessage
 import kotlinx.coroutines.launch
@@ -20,7 +21,10 @@ sealed interface ChatItem {
     data class Assistant(val reply: AssistantReply) : ChatItem
 }
 
-class ChatViewModel(private val assistant: MacroAssistant) : ViewModel() {
+class ChatViewModel(
+    private val assistant: MacroAssistant,
+    private val aiConfigured: () -> Boolean,
+) : ViewModel() {
     val items = mutableStateListOf<ChatItem>()
     var busy by mutableStateOf(false)
         private set
@@ -39,8 +43,9 @@ class ChatViewModel(private val assistant: MacroAssistant) : ViewModel() {
         }
     }
 
-    private suspend fun reply(trimmed: String, photo: Photo?): AssistantReply =
-        assistant.handle(
+    private suspend fun reply(trimmed: String, photo: Photo?): AssistantReply {
+        if (!aiConfigured()) return NOT_CONFIGURED
+        return assistant.handle(
             UserMessage(
                 // Una foto sin texto también es un mensaje: "estos son los macros".
                 text = trimmed.ifEmpty { "Te paso esta foto." },
@@ -49,4 +54,15 @@ class ChatViewModel(private val assistant: MacroAssistant) : ViewModel() {
                 image = photo?.jpeg,
             ),
         )
+    }
 }
+
+private val NOT_CONFIGURED = AssistantReply(
+    listOf(
+        ReplyBlock.Title("Falta conectar la IA"),
+        ReplyBlock.Text(
+            "Esta build no incluye google-services.json, así que no puedo interpretar mensajes. " +
+                "Añádelo en mobile/androidApp/ (pasos en mobile/README.md) y vuelve a instalar.",
+        ),
+    ),
+)
