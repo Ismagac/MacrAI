@@ -13,7 +13,12 @@ ALTER TABLE public.alimentos_usuario
   ADD COLUMN IF NOT EXISTS columna TEXT NOT NULL DEFAULT 'tal_cual'
     CHECK (columna IN ('tal_cual', 'preparado', 'escurrido')),
   ADD COLUMN IF NOT EXISTS peso_unidad_g NUMERIC(7, 1),
-  ADD COLUMN IF NOT EXISTS formato_envase TEXT;
+  ADD COLUMN IF NOT EXISTS formato_envase TEXT,
+  -- EAN del envase: une foto, escáner y Open Food Facts en una sola entrada.
+  ADD COLUMN IF NOT EXISTS codigo_barras TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_alimentos_usuario_barcode
+  ON public.alimentos_usuario (user_id, codigo_barras) WHERE codigo_barras IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS public.alimentos_alias (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

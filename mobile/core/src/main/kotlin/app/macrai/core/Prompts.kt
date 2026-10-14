@@ -24,13 +24,15 @@ Reglas:
 - Si hay texto de etiqueta (OCR), rellena "etiqueta" con los valores por 100 g/ml. Manda sobre el catálogo.
 - Si el usuario da kcal ("de 238 kcal", "20 calorías cada 100"), ponlas en kcal_total o kcal_100.
 - Peso en ayunas → peso. Captura del reloj → gasto con la fecha de la captura.
+- "dicho": las palabras exactas del usuario para ese alimento. "marca" solo si la dice.
+- Un sí o un no a la pregunta pendiente → responder.
 - Preguntas de razonamiento ("¿está bien planteado?", "¿vamos bien?") → analisis.
 
 Tipos: anadir{items,comida?,dia:"hoy"|"ayer"}, anadir_kcal{descripcion,kcal}, corregir_cantidad{objetivo?,cantidad,unidad},
 corregir_estado{objetivo?}, corregir_producto{alimento,kcal_100?,kcal_unidad?,etiqueta?}, parcial{objetivos,fraccion},
 mover{objetivo?,comida}, borrar{objetivo?}, guardar_etiqueta{etiqueta}, consultar_catalogo{alimento}, peso{kg},
-gasto{kcal,fecha?,pasos?}, nuevo_dia, cerrar_dia, analisis{pregunta}, charla{respuesta}.
-item: {alimento,cantidad?,unidad,con_hueso?,dejado_g?,compartido_entre?,otros_comieron_ud?,kcal_total?,kcal_100?,etiqueta?,estimacion_100?,provisional?}
+gasto{kcal,fecha?,pasos?}, nuevo_dia, cerrar_dia, alias{alimento,alias}, responder{si}, analisis{pregunta}, charla{respuesta}.
+item: {alimento,dicho?,marca?,cantidad?,unidad,con_hueso?,dejado_g?,compartido_entre?,otros_comieron_ud?,kcal_total?,kcal_100?,etiqueta?,estimacion_100?,provisional?}
 """.trimIndent()
 
 private val EXTRACTION_EXAMPLES = """
@@ -47,6 +49,8 @@ Ejemplos:
 "igual fue una cena de 1000 calorías" → {"acciones":[{"tipo":"anadir_kcal","descripcion":"cena a ojo","kcal":1000,"comida":"cena"}]}
 "Apunta 91,7 para el peso" → {"acciones":[{"tipo":"peso","kg":91.7}]}
 "¿Tienes los macros de la sopa de cebolla que tomo?" → {"acciones":[{"tipo":"consultar_catalogo","alimento":"sopa de cebolla"}]}
+"Cuando diga el batido me refiero al queso fresco batido" → {"acciones":[{"tipo":"alias","alimento":"queso fresco batido","alias":"el batido"}]}
+"Sí, eso es" (con pregunta pendiente) → {"acciones":[{"tipo":"responder","si":true}]}
 """.trimIndent()
 
 fun candidateFoods(catalog: List<FoodProfile>, text: String, limit: Int = MAX_CATALOG_CANDIDATES): List<FoodProfile> =
@@ -72,7 +76,8 @@ fun buildExtractionPrompt(
         appendLine("Catálogo del usuario que se parece al mensaje:")
         candidates.forEach { f ->
             val unit = f.unitWeightG?.let { ", unidad ${formatNumber(it)} g" } ?: ""
-            appendLine("- ${f.displayName}$unit")
+            val aliases = f.aliases.takeIf { it.isNotEmpty() }?.joinToString(", ", " (también: ", ")") ?: ""
+            appendLine("- ${f.displayName}$unit$aliases")
         }
         appendLine()
     }

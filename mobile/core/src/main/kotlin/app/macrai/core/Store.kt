@@ -30,6 +30,8 @@ data class StoreState(
     val pending: List<PendingQuestion> = emptyList(),
     /** Avisos que se dan una sola vez: errores de voz (§16.3), valores raros (regla 8). */
     val notedOnce: Set<String> = emptySet(),
+    /** Cuántas veces una forma de decir algo acabó en el mismo alimento: "frase|idAlimento" → veces. */
+    val aliasEvidence: Map<String, Int> = emptyMap(),
     val nextId: Long = 1,
 ) {
     fun entriesOf(day: LocalDate): List<LogEntry> = entries.filter { it.day == day }

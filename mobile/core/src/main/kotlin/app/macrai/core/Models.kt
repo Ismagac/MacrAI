@@ -77,7 +77,10 @@ data class FoodProfile(
     /** Para productos que solo se conocen por unidad (helado de 238 kcal la unidad). */
     val perUnit: Macros? = null,
     val packFormat: String? = null,
+    /** Formas en que el usuario lo llama: "el batido", "la de Mercadona". */
     val aliases: List<String> = emptyList(),
+    /** EAN del envase: el mismo producto por foto o por búsqueda es la misma entrada. */
+    val barcode: String? = null,
 ) {
     val displayName: String get() = if (brand.isNullOrBlank()) name else "$name $brand"
 }

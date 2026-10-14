@@ -46,6 +46,10 @@ data class LabelReading(
 @Serializable
 data class ItemSpec(
     val alimento: String,
+    /** Las palabras exactas del usuario para este alimento: de aquí salen los alias aprendidos. */
+    val dicho: String? = null,
+    /** Marca si la dice ("Hacendado", "HSN"): activa la búsqueda en la base de productos. */
+    val marca: String? = null,
     val cantidad: Double? = null,
     /** "g", "ml" o "ud". Sin unidad son gramos. */
     val unidad: String = "g",
@@ -113,6 +117,14 @@ sealed class Action {
 
     @Serializable @SerialName("consultar_catalogo")
     data class CatalogQuery(val alimento: String) : Action()
+
+    /** "Cuando diga «el batido» me refiero al queso fresco batido". */
+    @Serializable @SerialName("alias")
+    data class Alias(val alimento: String, val alias: String) : Action()
+
+    /** Sí o no a la pregunta pendiente (p. ej. confirmar un alias aprendido). */
+    @Serializable @SerialName("responder")
+    data class Answer(val si: Boolean) : Action()
 
     @Serializable @SerialName("peso")
     data class Weight(val kg: Double) : Action()

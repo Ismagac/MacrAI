@@ -144,36 +144,61 @@ fun findInCatalog(text: String, catalog: List<FoodProfile>, history: List<LogEnt
     return tied.firstOrNull { it.id == lastUse?.foodId } ?: tied.first()
 }
 
+/**
+ * Cascada del §5.1: etiqueta de ahora → catálogo personal (por código de barras, nombre o
+ * alias) → kcal del usuario → base de productos ([web], ya buscada por el motor) → estimación.
+ */
 fun chooseProfile(
     spec: ItemSpec,
     catalog: List<FoodProfile>,
     history: List<LogEntry>,
     newId: () -> String,
+    barcode: String? = null,
+    web: FoodProfile? = null,
 ): ProfileChoice? {
     spec.etiqueta?.let { label ->
         val (profile, notes) = labelToProfile(label, newId()) ?: return@let
-        val merged = mergeLabelIntoCatalog(profile, catalog, spec.alimento)
+        val merged = mergeLabelIntoCatalog(profile.copy(barcode = barcode), catalog, spec.alimento)
         return merged.copy(notes = notes + merged.notes)
     }
 
-    findInCatalog(spec.alimento, catalog, history)?.let { return ProfileChoice(it, isNew = false, notes = emptyList()) }
+    findInCatalogFor(spec, catalog, history, barcode)?.let { return ProfileChoice(it, isNew = false, notes = emptyList()) }
 
     val estimate = spec.estimatePer100?.toMacros()
     if (spec.kcalPer100 != null) {
         // Las kcal del usuario son fijas; los macros salen de la forma de la estimación.
-        val shape = estimate ?: return null
+        val shape = estimate ?: web?.per100 ?: return null
         val factor = if (shape.kcal > 0) spec.kcalPer100 / shape.kcal else 0.0
         val per100 = Macros(spec.kcalPer100, shape.protein * factor, shape.carbs * factor, shape.fat * factor)
         return ProfileChoice(
-            FoodProfile(newId(), spec.alimento, per100 = per100, source = ValueSource.USER, macrosEstimated = true),
+            FoodProfile(newId(), spec.alimento, spec.marca, per100 = per100, source = ValueSource.USER, macrosEstimated = true),
             isNew = true,
             notes = emptyList(),
         )
     }
+    if (web != null) {
+        val code = web.barcode?.let { " (código $it)" } ?: ""
+        return ProfileChoice(
+            web.copy(id = newId()),
+            isNew = true,
+            notes = listOf("${web.displayName}: valores de Open Food Facts$code, por 100 ${web.basis.unit}. Lo guardo en tu catálogo."),
+        )
+    }
     if (estimate != null) {
-        return ProfileChoice(FoodProfile(newId(), spec.alimento, per100 = estimate, source = ValueSource.ESTIMATE), isNew = true, notes = emptyList())
+        return ProfileChoice(FoodProfile(newId(), spec.alimento, spec.marca, per100 = estimate, source = ValueSource.ESTIMATE), isNew = true, notes = emptyList())
     }
     return null
+}
+
+/** Por código de barras primero; después por lo que nombró el modelo y por lo que dijo el usuario. */
+fun findInCatalogFor(spec: ItemSpec, catalog: List<FoodProfile>, history: List<LogEntry>, barcode: String? = null): FoodProfile? {
+    barcode?.let { code -> catalog.firstOrNull { it.barcode == code }?.let { return it } }
+    // Con marca, solo vale la entrada de esa marca (§5.3); si no hay, toca buscarla fuera.
+    val pool = spec.marca?.let { brand ->
+        catalog.filter { f -> matchScore(brand, f.brand ?: "") > 0 || matchScore(brand, f.name) > 0 }
+    } ?: catalog
+    return findInCatalog(spec.alimento, pool, history)
+        ?: spec.dicho?.let { findInCatalog(it, pool, history) }
 }
 
 private fun pitWeightFor(name: String): Double? {

@@ -158,3 +158,35 @@ class BalanceTest {
         assertTrue(m.reliable)
     }
 }
+
+class FoodDatabaseTest {
+    @Test fun parsesOpenFoodFactsProductWithKjOnlyAndStringNumbers() {
+        val json = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"code":"8480000143242","product_name":"Carne picada","brands":"Hacendado, Mercadona",
+               "quantity":"400 g","nutriments":{"energy_100g":795,"proteins_100g":"18","carbohydrates_100g":2.4,"fat_100g":12}}""",
+        ).let { it as kotlinx.serialization.json.JsonObject }
+        val food = assertNotNull(OpenFoodFacts.parseProduct(json))
+        assertEquals("Hacendado", food.brand)
+        assertEquals(190.0, food.per100.kcal)
+        assertEquals(18.0, food.per100.protein)
+        assertEquals("8480000143242", food.barcode)
+        assertEquals(ValueSource.WEB, food.source)
+    }
+
+    @Test fun productWithoutMacrosIsSkipped() {
+        val json = kotlinx.serialization.json.Json.parseToJsonElement("""{"code":"1","product_name":"X","nutriments":{}}""")
+            as kotlinx.serialization.json.JsonObject
+        assertEquals(null, OpenFoodFacts.parseProduct(json))
+    }
+}
+
+class AliasEditTest {
+    @Test fun aliasMovesBetweenFoodsAndCountsAsExactMatch() {
+        val batido = FoodProfile("a", "Queso fresco batido 0 %", per100 = Macros(46.0, 7.5, 4.0, 0.2), source = ValueSource.USER)
+        val blanco = FoodProfile("b", "Queso fresco blanco", per100 = Macros(144.0, 10.0, 3.5, 10.0), source = ValueSource.LABEL, aliases = listOf("el batido"))
+        val state = StoreState(catalog = listOf(batido, blanco)).addAlias("a", "el batido")
+        assertEquals(listOf("el batido"), state.catalog.first { it.id == "a" }.aliases)
+        assertEquals(emptyList(), state.catalog.first { it.id == "b" }.aliases)
+        assertEquals("a", findInCatalog("el batido", state.catalog, emptyList())?.id)
+    }
+}

@@ -130,6 +130,8 @@ class MacroAssistant(
             is Action.Delete -> delete(action, turn)
             is Action.SaveLabel -> saveLabel(action, turn)
             is Action.CatalogQuery -> catalogQuery(action, turn)
+            is Action.Alias -> alias(action, turn)
+            is Action.Answer -> answer(action, turn)
             is Action.Weight -> weight(action, turn)
             is Action.Burn -> burn(action, turn)
             Action.NewDay -> newDay(turn)
@@ -147,7 +149,7 @@ class MacroAssistant(
             val meal = resolveMeal(turn.now, action.comida, day, lastInDay)
 
             var idCounter = state.nextId
-            val choice = chooseProfile(spec, state.catalog, state.entries) { "f${idCounter++}" }
+            val choice = chooseProfile(spec, state.catalog, state.entries, newId = { "f${idCounter++}" })
             if (choice == null) {
                 turn.ask("No tengo «${spec.alimento}» en el catálogo. ¿Cuántas kcal tiene, o me pasas la etiqueta?")
                 continue
@@ -427,6 +429,33 @@ class MacroAssistant(
         turn.ask("¿Cuánto y en qué comida?")
     }
 
+    private suspend fun alias(action: Action.Alias, turn: Turn) {
+        val state = store.state()
+        val food = findInCatalog(action.alimento, state.catalog, state.entries)
+            ?: return turn.ask("No tengo «${action.alimento}» en el catálogo. ¿Me pasas la etiqueta o sus valores?")
+        store.update { it.addAlias(food.id, action.alias) }
+        turn.blocks += ReplyBlock.Title("Alias guardado: «${action.alias}» = ${food.displayName}")
+    }
+
+    /** Sí o no a la última pregunta de alias pendiente (clave "alias:<idAlimento>|<frase>"). */
+    private suspend fun answer(action: Action.Answer, turn: Turn) {
+        val pending = store.state().pending.lastOrNull { it.key.startsWith(ALIAS_KEY) }
+        if (pending == null) {
+            turn.blocks += ReplyBlock.Text("No tenía nada pendiente de confirmar.")
+            return
+        }
+        val (foodId, phrase) = pending.key.removePrefix(ALIAS_KEY).split('|', limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+        val updated = store.update { s ->
+            val cleared = s.copy(pending = s.pending - pending)
+            if (action.si) cleared.addAlias(foodId, phrase)
+            else cleared.copy(notedOnce = cleared.notedOnce + "alias-no:${normalizeText(phrase)}|$foodId")
+        }
+        val food = updated.food(foodId)?.displayName ?: "ese alimento"
+        turn.blocks += ReplyBlock.Text(
+            if (action.si) "Hecho: cuando digas «$phrase» entiendo $food." else "Vale, no lo guardo como alias.",
+        )
+    }
+
     private suspend fun weight(action: Action.Weight, turn: Turn) {
         val state = store.state()
         // El peso en ayunas es el marcador más fiable de que ya es otro día.
@@ -638,6 +667,8 @@ class MacroAssistant(
         return "¿Algo más en ${meal.label.lowercase()} o pasamos a ${next.label.lowercase()}?"
     }
 }
+
+private const val ALIAS_KEY = "alias:"
 
 private fun pendingKey(food: FoodProfile) = "cantidad:${normalizeText(food.name)}"
 
