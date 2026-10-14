@@ -1,7 +1,7 @@
 import type { MealType } from '@/types'
 
 // Lógica de "día" del registro de macros, independiente de la superficie
-// (chat web, bot de Telegram, o una herramienta expuesta a Gemini).
+// (chat web o una herramienta expuesta al modelo).
 
 export const MEAL_ORDER: MealType[] = ['desayuno', 'almuerzo', 'comida', 'merienda', 'cena', 'snack', 'otro']
 

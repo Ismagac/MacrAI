@@ -103,7 +103,6 @@ export interface Profile {
   sexo?: Sexo
   nivel_actividad?: ActivityLevel
   theme_mode?: 'light' | 'dark' | 'system'
-  telegram_chat_id?: number | null
   updated_at?: string
 }
 

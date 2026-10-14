@@ -156,18 +156,5 @@
     "retry": "Retry",
     "of": "of",
     "per100g": "per 100g"
-  },
-  "telegram": {
-    "bannerTitle": "MacrAI on Telegram",
-    "bannerDesc": "Log foods, check macros and manage everything without opening the app. MacrAI accompanies you directly on Telegram.",
-    "connectBtn": "Connect with Telegram",
-    "scanQr": "Or scan the QR code",
-    "linked": "Telegram account linked ✅",
-    "unlink": "Unlink",
-    "unlinkConfirm": "Are you sure you want to unlink your Telegram account?",
-    "linkSuccess": "Telegram linked successfully",
-    "linkError": "Error linking Telegram",
-    "awaitingVerification": "Awaiting verification... Open the bot on Telegram and send the code",
-    "verificationCode": "Your verification code is:"
   }
 }

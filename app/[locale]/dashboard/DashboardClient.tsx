@@ -11,7 +11,6 @@ import { CalorieRing } from '@/components/dashboard/CalorieRing'
 import { MealBreakdown } from '@/components/dashboard/MealBreakdown'
 import { TodayTable } from '@/components/dashboard/TodayTable'
 import { MacroSummaryCards } from '@/components/dashboard/MacroSummaryCards'
-import { TelegramBanner } from '@/components/dashboard/TelegramBanner'
 import { AddFoodModal } from '@/components/food/AddFoodModal'
 import { useConsumos } from '@/hooks/useConsumos'
 import { Button } from '@/components/ui/button'
@@ -94,8 +93,6 @@ export function DashboardClient({ initialConsumos, objetivo, today, locale }: Pr
           </div>
         </div>
       </div>
-
-      <TelegramBanner />
 
       {/* Registro del día */}
       <div className="surface-card p-4">
