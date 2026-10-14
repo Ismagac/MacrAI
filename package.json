@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "catalogo:importar": "node scripts/catalogo/importar.mjs",
+    "test:catalogo": "node --test scripts/catalogo/*.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",

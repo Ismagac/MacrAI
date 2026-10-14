@@ -37,6 +37,12 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 }
 
 class MainActivity : ComponentActivity() {
+    override fun onResume() {
+        super.onResume()
+        // Al volver a la app se bajan los cambios hechos desde otro móvil o desde la web.
+        (application as MacrAIApplication).sync.requestSync()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

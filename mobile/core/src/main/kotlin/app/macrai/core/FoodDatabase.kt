@@ -21,19 +21,14 @@ interface FoodDatabase {
     suspend fun byBarcode(code: String): FoodProfile?
 }
 
-/** GET que devuelve el cuerpo o null. La app pone la red; los tests, respuestas fijas. */
-fun interface HttpGet {
-    suspend fun get(url: String): String?
-}
-
-class OpenFoodFacts(private val http: HttpGet) : FoodDatabase {
+class OpenFoodFacts(private val http: Http) : FoodDatabase {
     private val json = Json { ignoreUnknownKeys = true }
 
     override suspend fun search(query: String, limit: Int): List<FoodProfile> {
         val q = URLEncoder.encode(query, "UTF-8")
         // Primero el catálogo español; si no hay nada, el mundial.
         for (host in listOf("es", "world")) {
-            val body = http.get(
+            val body = http.getOrNull(
                 "https://$host.openfoodfacts.org/cgi/search.pl?search_terms=$q&search_simple=1&action=process" +
                     "&json=1&page_size=${limit * 3}&fields=$FIELDS",
             ) ?: continue
@@ -48,7 +43,7 @@ class OpenFoodFacts(private val http: HttpGet) : FoodDatabase {
     }
 
     override suspend fun byBarcode(code: String): FoodProfile? {
-        val body = http.get("https://world.openfoodfacts.org/api/v2/product/$code.json?fields=$FIELDS") ?: return null
+        val body = http.getOrNull("https://world.openfoodfacts.org/api/v2/product/$code.json?fields=$FIELDS") ?: return null
         val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
         return root["product"]?.let { parseProduct(it.jsonObject) }
     }
@@ -80,6 +75,7 @@ class OpenFoodFacts(private val http: HttpGet) : FoodDatabase {
                 source = ValueSource.WEB,
                 packFormat = quantity,
                 barcode = code,
+                origin = "Open Food Facts",
             )
         }
 

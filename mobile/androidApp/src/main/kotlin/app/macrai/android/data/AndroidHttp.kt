@@ -1,33 +1,36 @@
 package app.macrai.android.data
 
-import app.macrai.core.HttpGet
+import app.macrai.core.Http
+import app.macrai.core.HttpRequest
+import app.macrai.core.HttpResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
 
-// Open Food Facts pide un User-Agent propio que identifique la app y un contacto.
+// Open Food Facts pide un User-Agent propio que identifique la app; a Supabase le da igual.
 private const val USER_AGENT = "MacrAI/0.1 (Android; https://github.com/Ismagac/MacrAI)"
-private const val TIMEOUT_MS = 8000
+private const val TIMEOUT_MS = 10_000
 
-/** GET sencillo: devuelve el cuerpo con 200 y null con cualquier otra cosa (sin red, 404, 429…). */
-class AndroidHttp : HttpGet {
-    override suspend fun get(url: String): String? = withContext(Dispatchers.IO) {
-        runCatching {
-            val connection = URL(url).openConnection() as HttpURLConnection
-            try {
-                connection.connectTimeout = TIMEOUT_MS
-                connection.readTimeout = TIMEOUT_MS
-                connection.setRequestProperty("User-Agent", USER_AGENT)
-                connection.setRequestProperty("Accept", "application/json")
-                if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                    connection.inputStream.bufferedReader().use { it.readText() }
-                } else {
-                    null
-                }
-            } finally {
-                connection.disconnect()
+class AndroidHttp : Http {
+    override suspend fun send(request: HttpRequest): HttpResponse = withContext(Dispatchers.IO) {
+        val connection = URL(request.url).openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = request.method
+            connection.connectTimeout = TIMEOUT_MS
+            connection.readTimeout = TIMEOUT_MS
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("Accept", "application/json")
+            request.headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
+            request.body?.let { body ->
+                connection.doOutput = true
+                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             }
-        }.getOrNull()
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            HttpResponse(status, stream?.bufferedReader()?.use { it.readText() }.orEmpty())
+        } finally {
+            connection.disconnect()
+        }
     }
 }

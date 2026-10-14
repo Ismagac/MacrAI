@@ -81,6 +81,8 @@ data class FoodProfile(
     val aliases: List<String> = emptyList(),
     /** EAN del envase: el mismo producto por foto o por búsqueda es la misma entrada. */
     val barcode: String? = null,
+    /** Base de la que salió, para decirlo ("Open Food Facts", "el catálogo de MacrAI (Mercadona)"). No se sincroniza. */
+    val origin: String? = null,
 ) {
     val displayName: String get() = if (brand.isNullOrBlank()) name else "$name $brand"
 }

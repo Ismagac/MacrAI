@@ -30,6 +30,7 @@ private class JsonModel(private val script: Map<String, String>) : LanguageModel
 private val PAVO_HACENDADO = FoodProfile(
     "off:8480000123456", "Pechuga de pavo finas lonchas", "Hacendado",
     Macros(70.0, 15.0, 1.0, 0.8), source = ValueSource.WEB, barcode = "8480000123456", packFormat = "250 g",
+    origin = "Open Food Facts",
 )
 
 class ProductsAndAliasesTest {
@@ -82,7 +83,7 @@ class ProductsAndAliasesTest {
 
     @Test fun repeatedNicknameIsProposedAsAliasAndSavedOnYes() = runTest {
         val carne = FoodProfile("f1", "Carne picada de ternera", "Mercadona", Macros(190.0, 18.0, 2.4, 12.0), source = ValueSource.LABEL)
-        val store = InMemoryMacroStore(StoreState(catalog = listOf(carne), nextId = 10))
+        val store = InMemoryMacroStore(StoreState(catalog = listOf(carne)))
         val add = """{"acciones":[{"tipo":"anadir","comida":"comida","items":[{"alimento":"carne picada de ternera","dicho":"la de Mercadona","cantidad":100}]}]}"""
         val bot = MacroAssistant(
             store,

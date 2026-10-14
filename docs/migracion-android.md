@@ -11,7 +11,13 @@
 - **Lo que gana el móvil, aparte de la IA:** OCR de etiquetas en el dispositivo (gratis y en cualquier Android), dictado por voz del sistema y, sobre todo, **Health Connect**: el peso y el gasto de Samsung Health se leen solos, sin mandar capturas del reloj cada noche.
 - **Imagen nueva:** identidad "Libreta" (papel, tinta y un único acento caqui), con el chat como pantalla principal y el día siempre a la vista.
 - **Publicar para otros:** cambia tres cosas respecto a una app personal: cuentas y datos por usuario, la nube de pago (la capa gratuita se comparte entre todos los usuarios y Google puede usar esos datos) y los requisitos de Google Play para apps de salud (§7).
-- **Hecho en esta rama:** el núcleo con 31 tests, sacados de los casos reales del documento; el esqueleto de la app Android (chat, Semana, Catálogo, IA híbrida, voz, OCR y Health Connect); las migraciones de Supabase `015` (modelo nuevo) y `016` (retirada de Telegram); y la eliminación del bot de Telegram de la web.
+- **Hecho en esta rama:**
+  - el núcleo, con 54 tests sacados de los casos reales del documento;
+  - la app Android: chat, Semana, Catálogo, Ajustes, IA híbrida, voz, OCR, código de barras, Health Connect y edición manual;
+  - cuentas y sincronización con Supabase, que comparte datos con la web;
+  - el catálogo global de supermercados, con su importador semanal;
+  - las migraciones `015`–`017`, probadas en PostgreSQL;
+  - la retirada de Telegram.
 
 ---
 
@@ -128,13 +134,19 @@ mobile/
 │   ├── Prompts.kt          Prompt compacto (Nano) y de razonamiento (nube)
 │   ├── Assistant.kt        Motor: aplica acciones y compone la respuesta
 │   ├── Reply.kt            Bloques de respuesta y su Markdown
-│   └── Store.kt            Interfaz de persistencia
+│   ├── Store.kt, Edits.kt  Persistencia y ediciones compartidas por chat y pantallas
+│   ├── FoodDatabase.kt     Open Food Facts
+│   ├── GlobalCatalog.kt    Catálogo global de MacrAI y cadena de bases de productos
+│   ├── Supabase.kt         Auth y PostgREST sin SDK
+│   ├── Sync.kt             Sincronización registro a registro
+│   └── CatalogImport.kt    Importar un catálogo en Markdown
 └── androidApp/             Compose + Firebase AI + ML Kit + Health Connect
     ├── ai/HybridLanguageModel.kt
-    ├── input/LabelOcr.kt, SpeechInput.kt
+    ├── input/LabelOcr.kt (OCR y código de barras), SpeechInput.kt
     ├── health/HealthConnectSource.kt
-    ├── data/FileMacroStore.kt   (fase 1; Room + Supabase en fase 2)
-    └── ui/                      Hoy (chat), Semana, Catálogo, tema
+    ├── data/FileMacroStore.kt, SyncManager.kt, AndroidHttp.kt
+    └── ui/                 Hoy (chat y hoja de cada comida), Semana, Catálogo, Ajustes, tema
+scripts/catalogo/           Importador semanal del catálogo global (Node, con tests)
 ```
 
 ```mermaid
@@ -153,7 +165,15 @@ flowchart LR
   M --> UI[Respuesta: añadido, comida, día]
 ```
 
-**Backend:** Supabase sigue siendo la fuente de verdad sincronizada. La app trabaja sin red y sincroniza al recuperar la conexión. Las claves de la IA dejan de vivir en un servidor propio: Firebase AI Logic, protegido con App Check, llama a Gemini sin meter ninguna API key en el APK.
+**Backend:** Supabase es la copia sincronizada de cada cuenta. La app trabaja sin red y sincroniza unos segundos después de cada cambio, al abrirse y bajo demanda (`core/Sync.kt`):
+
+1. Baja lo que cambió en el servidor desde la última vez (`updated_at`, que ponen triggers) y los borrados (`sync_borrados`).
+2. Lo mezcla: si un registro también cambió en el móvil, gana el del móvil.
+3. Sube lo cambiado y lo borrado.
+
+"Cambiado" se decide comparando cada registro con su huella de la última sincronización, así que ninguna pantalla tiene que marcar nada. Los identificadores son UUID, para que dos móviles nunca choquen. Se usan las mismas tablas que la web (`consumos`, `alimentos_usuario`, `profiles`), así que el historial de la web aparece en la app.
+
+Las claves de la IA no viven en ningún servidor propio: Firebase AI Logic, protegido con App Check, llama a Gemini sin meter ninguna API key en el APK.
 
 ---
 
@@ -169,6 +189,12 @@ Migración [`supabase/migrations/015_android_core_model.sql`](../supabase/migrat
 | `consumos.fecha` pasa a significar **día de registro** | §2.11 |
 | `pesajes`, `gasto_diario`, `dias_cerrados` | §9, §10 |
 | `profiles`: `dia_abierto`, `deficit_objetivo_kcal`, `proteina_g_por_kg`, `lesion_activa` | §13, §15 |
+| `alimentos_usuario.alias` (lista) y `*_unidad` | Alias por alimento; valores por unidad sin depender de las columnas `*_per_unit` antiguas |
+| **017**: `updated_at` con trigger en todo lo sincronizado, `sync_borrados` | Sincronización |
+| **017**: `alimentos_global` con EAN único, marca, supermercado, formato, foto, precio, `con_nutricion` y `fuente_nutricion` | Catálogo global (§5.2) |
+| **017**: `buscar_alimentos_global` (trigramas, también sin cuenta), `aportar_etiqueta` (valida 4P+4C+9G y nunca pisa datos de Open Food Facts), `borrar_mi_cuenta` | Búsqueda, aportaciones de usuarios y requisito de Play |
+
+Las tres migraciones se han aplicado sobre PostgreSQL 16, encima de las 001–014, en una base que imita la de Supabase. Allí se han probado los triggers, la RLS (un usuario no ve nada de otro), la búsqueda sin cuenta, la aportación válida y la rechazada, y el borrado de cuenta en cascada.
 
 Los tipos `snack` y `otro` se quedan en la base por compatibilidad. La app los muestra dentro de la cena.
 
@@ -179,7 +205,7 @@ La migración [`016_remove_telegram.sql`](../supabase/migrations/016_remove_tele
 El documento de comportamiento llevaba dentro tu catálogo personal (apéndices A y B). Con más usuarios, el prompt no puede incluir los alimentos de nadie. Por eso se ha separado:
 
 - [`docs/asistente/comportamiento-chat-macros.md`](asistente/comportamiento-chat-macros.md): reglas generales. Se empaqueta en el APK como system prompt de la nube.
-- [`docs/datos/catalogo-inicial.md`](datos/catalogo-inicial.md): tu catálogo validado. Se importa a tu cuenta (fase 2) y queda fuera del APK.
+- [`docs/datos/catalogo-inicial.md`](datos/catalogo-inicial.md): tu catálogo validado. Se importa desde Catálogo → Importar .md y queda fuera del APK.
 
 El contexto personal (§15: peso, altura, objetivo, lesiones) sale del perfil de cada usuario y se rellena en el onboarding.
 
@@ -192,16 +218,22 @@ Cómo lo resuelven las apps que "tienen de todo":
 - **Cobertura real** (datos de EasyCompra del 13 de octubre de 2026): Mercadona, 2.865 productos, todos con EAN y 983 (34 %) con macros completos; Dia, 609 de 754; Carrefour y Lidl, ninguno.
 - **La API de Mercadona** da id, nombre, precio, foto, EAN, formato, ingredientes y alérgenos, pero **no la tabla nutricional**. Es interna: sin documentación ni términos para terceros, y su `robots.txt` bloquea `/api`.
 
-**Lo que hace MacrAI ahora (sin servidor):**
+**Cómo lo resuelve MacrAI:**
 
-1. Catálogo personal: etiquetas, correcciones, alias y lo ya buscado.
-2. Código de barras en la foto → Open Food Facts por EAN.
-3. Producto de marca nombrado en el chat → búsqueda en Open Food Facts (primero España, luego mundial).
-4. Genéricos ("pechuga de pollo") → estimación del modelo, marcada como tal.
+1. **Catálogo personal:** etiquetas, correcciones, alias y todo lo ya buscado. Va primero y no gasta red.
+2. **Catálogo global de MacrAI** (`alimentos_global`). `scripts/catalogo/importar.mjs` lo llena cada semana desde GitHub Actions:
+   - recorre la API de la tienda de Mercadona (nombre, EAN, formato, foto, precio);
+   - cruza por EAN con Open Food Facts;
+   - nunca pisa la nutrición que ya hayan aportado los usuarios;
+   - lo que no tenga macros queda con `con_nutricion = false`, "pendiente de etiqueta".
+   Se lee también sin cuenta.
+3. **Aportaciones:** cuando un usuario con cuenta fotografía una etiqueta con código de barras, sus valores (validados con 4P+4C+9G) rellenan ese producto para todos. Así se cubre el 66 % de Mercadona que Open Food Facts no tiene.
+4. **Open Food Facts** directo, por código de barras o por nombre (primero España, luego mundial), para lo que no esté en lo anterior.
+5. **Genéricos** ("pechuga de pollo"): estimación del modelo, marcada como tal.
 
-Todo lo que viene de fuera se guarda en el catálogo del usuario con su EAN y su fuente (`Web`).
+Todo lo que viene de fuera se guarda en el catálogo del usuario con su EAN y su fuente (`Web`), y la respuesta dice de dónde salió.
 
-**Siguiente paso posible: catálogo compartido en el servidor.** Una tarea diaria en Supabase (o en GitHub Actions) recorre los catálogos de Mercadona y Dia, guarda nombre, EAN, formato y foto en `alimentos_global`, y los cruza con Open Food Facts por EAN. Las etiquetas que fotografían los usuarios rellenan los huecos para todos. Así, "la leche de Hacendado" funcionaría sin escanear nada. Es lo que hacen QuéFalta y EasyCompra, pero depende de APIs no oficiales que pueden cambiar o cerrarse, y para una app publicada conviene revisar antes los términos de cada supermercado. Nunca desde el móvil de cada usuario: bloquearían su IP.
+**Riesgo asumido:** la API de Mercadona es interna y su `robots.txt` pide no rastrear `/api`. El importador va a ritmo pausado (unas 4 peticiones por segundo), una vez por semana, desde un servidor y nunca desde los móviles. Si Mercadona la cierra, la app sigue funcionando con los pasos 1, 3, 4 y 5. Dia, Carrefour y Lidl se pueden añadir como nuevas fuentes en `scripts/catalogo/fuentes.mjs`.
 
 ---
 
@@ -232,7 +264,7 @@ El documento describe una libreta que calcula, no una app de gimnasio. La imagen
 | **Hoy** (principal) | La **tira del día** fija arriba (día de registro abierto o cerrado, kcal, proteína frente al mínimo y las 5 comidas), la conversación y el compositor | Dashboard, Diario, Chat |
 | **Semana** | Balance contra el reloj, peso en ayunas con su media, estimación del mantenimiento y botón de importar de Health Connect | Historial, Objetivos |
 | **Catálogo** | Alimentos con su insignia de fuente (E/U/Web/Est), búsqueda tolerante a errores, peso unitario | Alimentos |
-| Ajustes (fase 2) | Perfil (§15), objetivo de déficit, cuenta y sincronización | Perfil |
+| **Ajustes** | Perfil (§15), objetivo de déficit, cuenta, sincronización y borrado | Perfil |
 
 ### 6.3 Componentes clave
 
@@ -249,10 +281,11 @@ El documento describe una libreta que calcula, no una app de gimnasio. La imagen
 ### Fase 0 — Fundamentos (hecho en esta rama)
 
 - [x] Documento de comportamiento en el repo como fuente única del system prompt, separado de tu catálogo personal
-- [x] Núcleo `core` con las reglas del documento y 31 tests con casos reales (frontera del día, nectarina, helado de madrugada, fila desplazada del queso crema, Pepero, hueso, ketchup de otra marca, balance, mantenimiento)
+- [x] Núcleo `core` con las reglas del documento y tests con casos reales (frontera del día, nectarina, helado de madrugada, fila desplazada del queso crema, Pepero, hueso, ketchup de otra marca, balance, mantenimiento)
 - [x] App Android: tema "Libreta", Hoy, Semana, Catálogo, IA híbrida, OCR, voz, Health Connect (peso y calorías), registro local
 - [x] Migraciones Supabase `015` (modelo nuevo) y `016` (sin Telegram)
 - [x] Telegram retirado de la web
+- [x] Open Food Facts, código de barras, alias aprendidos, edición manual del día y del catálogo, Ajustes
 
 ### Fase 1 — Primera build en un móvil real (1-2 semanas)
 
@@ -263,13 +296,18 @@ Pasos para compilar y probar: [`mobile/README.md`](../mobile/README.md).
 - **Evaluación de extracción:** convertir los ejemplos del documento (y del historial real) en un juego de ~100 mensajes con su JSON esperado, y medir Nano frente a la nube. Si Nano falla en algo concreto, se ajustan los ejemplos del prompt o esa tarea pasa a la nube.
 - Probar Health Connect con Samsung Health y comparar con las capturas del reloj.
 
-### Fase 2 — Cuentas, sincronización y onboarding (2-3 semanas)
+### Fase 2 — Cuentas, sincronización y catálogo global (hecho en esta rama)
 
-- Inicio de sesión con Supabase (`supabase-kt` + Credential Manager con Google). Los datos de cada usuario ya están aislados por RLS.
-- Base local con Room en lugar del JSON; sincronización con `client_id` contra Supabase.
-- **Onboarding:** peso, altura, edad, objetivo de déficit y mínimo de proteína (§15), con el consentimiento explícito para los datos de salud (§7, «Requisitos para publicar»).
-- Importar a tu cuenta tu catálogo inicial y tus consumos de la web.
-- Ajustes: perfil, objetivo, exportar datos y **borrar la cuenta**.
+- [x] Cuentas con email y contraseña contra Supabase Auth (cliente propio en `core/Supabase.kt`, probado con un servidor falso)
+- [x] Sincronización registro a registro entre móviles y con la web, con borrados y renovación de sesión (9 tests con dos móviles)
+- [x] Historial de la web en la app (comidas `snack`/`otro` incluidas)
+- [x] Catálogo global: importador semanal de Mercadona + Open Food Facts y aportación de etiquetas
+- [x] Importar el catálogo inicial en Markdown con sus alias
+- [x] Borrar la cuenta (y todos sus datos) desde Ajustes
+- [ ] Iniciar sesión con Google (Credential Manager): necesita el cliente OAuth en Google Cloud y en Supabase
+- [ ] **Onboarding** con altura, edad, objetivo y consentimiento explícito para los datos de salud (§7, «Requisitos para publicar»). Hoy el peso, la proteína y el déficit se ponen en Ajustes.
+- [ ] Exportar los datos (RGPD)
+- [ ] Si el JSON local se queda corto con años de registro, pasar a Room sin tocar el motor
 
 ### Fase 3 — Publicación en Google Play (2-3 semanas)
 
@@ -283,11 +321,12 @@ Cuando la app tenga cuentas y sincronización, la web Next.js deja de hacer falt
 
 | Tema | Qué hace falta | Por qué |
 |---|---|---|
-| Cuentas | Inicio de sesión, datos por usuario en Supabase con RLS y sincronización | Hoy el registro de la app es local y de una sola persona |
+| Cuentas | Hecho: email y contraseña, RLS por usuario, sincronización y borrado de cuenta. Falta Google | Cada usuario ve y sincroniza solo lo suyo |
 | Nube de IA | Pasar la Gemini Developer API (o Vertex AI) al **plan de pago**, con spend cap, App Check y un límite diario de peticiones por usuario | La capa gratuita es por proyecto, no por usuario: la agotarían entre todos. Además, Google puede usar los datos de la capa gratuita para mejorar sus productos, y aquí son datos de salud |
 | Coste | Nano atiende gratis los mensajes cortos en móviles compatibles; el resto va a Flash-Lite. Medir el coste real por usuario y día en la fase 1 | Decide si basta con un límite gratuito o si hace falta suscripción |
 | Privacidad | Política de privacidad en una URL pública (no PDF), enlazada en la app y en la pantalla de permisos de Health Connect | Requisito de Google Play para apps de salud |
-| Health Connect | Declaración de app de salud en Play Console, justificando cada tipo de dato. Solo se piden peso y calorías totales | Play revisa cada permiso; pedir de más retrasa o bloquea la aprobación |
+| Health Connect | Declaración de app de salud en Play Console, justificando cada tipo de dato. Se piden peso, calorías totales y pasos | Play revisa cada permiso; pedir de más retrasa o bloquea la aprobación |
+| Catálogo de supermercados | Revisar los términos de Mercadona antes de publicar; si no lo permiten, desactivar esa fuente del importador (la app no depende de ella) | La API es interna y su `robots.txt` pide no rastrear `/api` |
 | RGPD | Consentimiento explícito, exportación y borrado de datos | El peso y la ingesta son datos de salud: categoría especial |
 | Borrado de cuenta | Desde la app y desde una URL web | Requisito de Google Play para apps con cuentas |
 | Seguridad de datos | Formulario de Play: datos recogidos (salud, fotos, voz), dónde se procesan (dispositivo o nube) y si se comparten | Requisito de Google Play |

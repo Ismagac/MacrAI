@@ -32,7 +32,8 @@ data class StoreState(
     val notedOnce: Set<String> = emptySet(),
     /** Cuántas veces una forma de decir algo acabó en el mismo alimento: "frase|idAlimento" → veces. */
     val aliasEvidence: Map<String, Int> = emptyMap(),
-    val nextId: Long = 1,
+    /** Estado de la sincronización con la cuenta (Supabase). */
+    val sync: SyncMeta = SyncMeta(),
 ) {
     fun entriesOf(day: LocalDate): List<LogEntry> = entries.filter { it.day == day }
 
@@ -40,6 +41,9 @@ data class StoreState(
 
     fun food(id: String?): FoodProfile? = id?.let { catalog.firstOrNull { f -> f.id == it } }
 }
+
+/** Identificadores UUID: dos móviles de la misma cuenta pueden crear registros sin chocar. */
+fun newId(): String = java.util.UUID.randomUUID().toString()
 
 class InMemoryMacroStore(initial: StoreState = StoreState()) : MacroStore {
     private val mutex = Mutex()

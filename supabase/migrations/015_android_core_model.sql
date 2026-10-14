@@ -1,5 +1,5 @@
 -- Modelo de datos de la app Android (docs/migracion-android.md, §5).
--- Todo es aditivo: la web y el bot de Telegram siguen funcionando con las columnas de antes.
+-- Todo es aditivo: la web sigue funcionando con las columnas de antes.
 
 -- ─── Catálogo: de dónde sale cada valor y cómo se aplica (§5, §6, §7 del comportamiento) ──
 
@@ -15,24 +15,19 @@ ALTER TABLE public.alimentos_usuario
   ADD COLUMN IF NOT EXISTS peso_unidad_g NUMERIC(7, 1),
   ADD COLUMN IF NOT EXISTS formato_envase TEXT,
   -- EAN del envase: une foto, escáner y Open Food Facts en una sola entrada.
-  ADD COLUMN IF NOT EXISTS codigo_barras TEXT;
+  ADD COLUMN IF NOT EXISTS codigo_barras TEXT,
+  -- Formas en que el usuario lo llama ("el batido", "la de Mercadona"). La app garantiza
+  -- que un alias pertenece a un solo alimento.
+  ADD COLUMN IF NOT EXISTS alias TEXT[] NOT NULL DEFAULT '{}',
+  -- Valores por unidad (helado de 238 kcal la unidad). Columnas nuevas para no depender de
+  -- los nombres *_per_unit, que según la base pueden estar en inglés o en español.
+  ADD COLUMN IF NOT EXISTS kcal_unidad NUMERIC(8, 2),
+  ADD COLUMN IF NOT EXISTS proteinas_unidad NUMERIC(7, 2),
+  ADD COLUMN IF NOT EXISTS carbohidratos_unidad NUMERIC(7, 2),
+  ADD COLUMN IF NOT EXISTS grasas_unidad NUMERIC(7, 2);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_alimentos_usuario_barcode
+CREATE INDEX IF NOT EXISTS idx_alimentos_usuario_barcode
   ON public.alimentos_usuario (user_id, codigo_barras) WHERE codigo_barras IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS public.alimentos_alias (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id     UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  alimento_id UUID NOT NULL REFERENCES public.alimentos_usuario(id) ON DELETE CASCADE,
-  alias       TEXT NOT NULL,
-  created_at  TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE (user_id, alias)
-);
-
-ALTER TABLE public.alimentos_alias ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "alimentos_alias_all_own" ON public.alimentos_alias
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- ─── Consumos: supuestos visibles y día de registro ─────────────────────────────
 -- `fecha` pasa a ser el día de registro, que no cambia a medianoche (§2.11): la app lo
@@ -44,11 +39,7 @@ ALTER TABLE public.consumos
   ADD COLUMN IF NOT EXISTS provisional BOOLEAN NOT NULL DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS solo_kcal BOOLEAN NOT NULL DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS cantidad_dicha_gr NUMERIC(7, 1),
-  -- Identificador local de la app para sincronizar sin duplicar.
-  ADD COLUMN IF NOT EXISTS client_id TEXT;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_consumos_user_client_id
-  ON public.consumos (user_id, client_id) WHERE client_id IS NOT NULL;
+  ADD COLUMN IF NOT EXISTS unidades NUMERIC(7, 2);
 
 -- ─── Peso en ayunas (§9) ────────────────────────────────────────────────────────
 

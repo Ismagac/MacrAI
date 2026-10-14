@@ -1,0 +1,45 @@
+name: Catálogo global
+
+# Importa Mercadona a alimentos_global (Supabase) y lo cruza con Open Food Facts por EAN.
+# Necesita los secretos SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY del repositorio.
+
+on:
+  schedule:
+    - cron: "17 4 * * 1" # lunes, 04:17 UTC
+  workflow_dispatch:
+    inputs:
+      limite:
+        description: "Máximo de productos (vacío = todos)"
+        required: false
+      prueba:
+        description: "Solo contar, sin escribir"
+        type: boolean
+        default: false
+
+jobs:
+  importar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Tests del importador
+        run: node --test scripts/catalogo/*.test.mjs
+      - name: Sin secretos de Supabase
+        if: env.SUPABASE_URL == '' && inputs.prueba != true
+        run: echo "::notice::Faltan SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en los secretos del repositorio; no se importa nada."
+      - name: Importar
+        if: env.SUPABASE_URL != '' || inputs.prueba == true
+        env:
+          LIMITE: ${{ inputs.limite }}
+          PRUEBA: ${{ inputs.prueba }}
+        run: |
+          args=()
+          if [[ "$LIMITE" =~ ^[0-9]+$ ]]; then args+=(--limite "$LIMITE"); fi
+          if [ "$PRUEBA" = "true" ]; then args+=(--prueba); fi
+          node scripts/catalogo/importar.mjs "${args[@]}"

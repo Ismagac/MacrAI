@@ -76,14 +76,14 @@ class MacroAssistant(
     private suspend fun identifyBarcode(code: String, turn: Turn) {
         val state = store.state()
         val known = state.catalog.firstOrNull { it.barcode == code }
-        val food = known ?: foods?.let { runCatching { it.byBarcode(code) }.getOrNull() }?.copy(id = nextId(state, "f"))
+        val food = known ?: foods?.let { runCatching { it.byBarcode(code) }.getOrNull() }?.copy(id = newId())
         if (food == null) {
             turn.blocks += ReplyBlock.Text("No encuentro el código $code en Open Food Facts.")
             turn.ask("¿Me pasas la foto de la tabla nutricional?")
             return
         }
-        if (known == null) store.update { s -> s.upsertFood(food).copy(nextId = s.nextId + 1) }
-        val origin = if (known != null) "Lo tienes en tu catálogo" else "Lo he encontrado en Open Food Facts y lo he guardado en tu catálogo"
+        if (known == null) store.update { it.upsertFood(food) }
+        val origin = if (known != null) "Lo tienes en tu catálogo" else "Lo he encontrado en ${food.origin ?: "la base de productos"} y lo he guardado en tu catálogo"
         turn.blocks += ReplyBlock.Title(food.displayName + (food.packFormat?.let { " ($it)" } ?: ""))
         turn.blocks += ReplyBlock.Text("$origin. ${labelSummary(food)}")
         turn.ask("¿Cuánto has tomado y en qué comida?")
@@ -131,7 +131,6 @@ class MacroAssistant(
         store.update { s -> s.copy(notedOnce = s.notedOnce + fresh.map { "voz:${normalizeText(it.oido)}" }) }
     }
 
-    private fun nextId(state: StoreState, prefix: String) = "$prefix${state.nextId}"
 
     private fun dayFor(state: StoreState, now: LocalDateTime, meal: Meal?, dia: String, signal: DaySignal = DaySignal.NONE): DayDecision {
         val current = resolveLogDay(now, state.openDay, state.lastEntry?.loggedAt, signal, meal)
@@ -181,8 +180,7 @@ class MacroAssistant(
             val meal = resolveMeal(turn.now, action.comida, day, lastInDay)
 
             val web = if (needsProductLookup(spec, state, barcode)) lookupProduct(spec, barcode) else null
-            var idCounter = state.nextId
-            val choice = chooseProfile(spec, state.catalog, state.entries, newId = { "f${idCounter++}" }, barcode = barcode, web = web)
+            val choice = chooseProfile(spec, state.catalog, state.entries, newId = ::newId, barcode = barcode, web = web)
             if (choice == null) {
                 turn.ask("No tengo «${spec.alimento}» en el catálogo. ¿Cuántas kcal tiene, o me pasas la etiqueta?")
                 continue
@@ -207,7 +205,7 @@ class MacroAssistant(
             turn.notes += result.assumptions
 
             val entry = LogEntry(
-                id = "e$idCounter",
+                id = newId(),
                 day = day.day,
                 meal = meal.meal,
                 name = result.name,
@@ -221,7 +219,6 @@ class MacroAssistant(
                 units = result.units,
                 loggedAt = turn.now,
             )
-            idCounter++
             store.update { s ->
                 val catalog = if (choice.isNew) s.catalog + choice.profile
                 else s.catalog.map { if (it.id == choice.profile.id) choice.profile else it }
@@ -230,7 +227,6 @@ class MacroAssistant(
                     catalog = catalog,
                     openDay = if (action.dia == "ayer") s.openDay else maxOfNullable(s.openDay, day.day),
                     pending = s.pending.filterNot { it.key == pendingKey(choice.profile) },
-                    nextId = idCounter,
                 )
             }
             turn.added += entry
@@ -290,7 +286,7 @@ class MacroAssistant(
         val day = dayFor(state, turn.now, action.comida, action.dia)
         val meal = resolveMeal(turn.now, action.comida, day, state.entriesOf(day.day).maxByOrNull { it.loggedAt })
         val entry = LogEntry(
-            id = nextId(state, "e"),
+            id = newId(),
             day = day.day,
             meal = meal.meal,
             name = action.descripcion,
@@ -299,7 +295,7 @@ class MacroAssistant(
             kcalOnly = true,
             loggedAt = turn.now,
         )
-        store.update { s -> s.copy(entries = s.entries + entry, nextId = s.nextId + 1, openDay = maxOfNullable(s.openDay, day.day)) }
+        store.update { s -> s.copy(entries = s.entries + entry, openDay = maxOfNullable(s.openDay, day.day)) }
         turn.added += entry
         turn.notes += "Registro solo las kcal; la proteína de este día no es fiable."
         turn.touchedDay = day.day
@@ -459,15 +455,10 @@ class MacroAssistant(
 
     private suspend fun saveLabel(action: Action.SaveLabel, turn: Turn) {
         val state = store.state()
-        val (profile, notes) = labelToProfile(action.etiqueta, nextId(state, "f"))
+        val (profile, notes) = labelToProfile(action.etiqueta, newId())
             ?: return turn.ask("No consigo leer los macros de la etiqueta. ¿Me pasas otra foto?")
         val choice = mergeLabelIntoCatalog(profile, state.catalog)
-        store.update { s ->
-            s.copy(
-                catalog = if (choice.isNew) s.catalog + choice.profile else s.catalog.map { if (it.id == choice.profile.id) choice.profile else it },
-                nextId = s.nextId + 1,
-            )
-        }
+        store.update { it.upsertFood(choice.profile) }
         turn.blocks += ReplyBlock.Title("Guardada: ${choice.profile.displayName}")
         turn.notes += labelSummary(choice.profile)
         choice.profile.packFormat?.let { turn.notes += "Formato: $it." }
@@ -488,10 +479,10 @@ class MacroAssistant(
                 turn.ask("¿Me pasas la foto de la etiqueta o el código de barras?")
                 return
             }
-            val saved = found.copy(id = nextId(state, "f"))
-            store.update { s -> s.upsertFood(saved).copy(nextId = s.nextId + 1) }
+            val saved = found.copy(id = newId())
+            store.update { it.upsertFood(saved) }
             turn.blocks += ReplyBlock.Text(
-                "No lo tenía, pero en Open Food Facts está ${saved.displayName}" +
+                "No lo tenía, pero en ${saved.origin ?: "la base de productos"} está ${saved.displayName}" +
                     (saved.packFormat?.let { " ($it)" } ?: "") + ". ${labelSummary(saved)} Lo he guardado en tu catálogo.",
             )
             turn.notes += "Si tu producto es otro, pásame la foto de la etiqueta y lo guardo aparte."

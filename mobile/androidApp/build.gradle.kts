@@ -11,6 +11,13 @@ if (file("google-services.json").exists()) {
     apply(plugin = libs.plugins.google.services.get().pluginId)
 }
 
+// Supabase (cuentas, sincronización y catálogo global). Se leen de mobile/local.properties,
+// que no se sube al repo. Sin ellos la app funciona igual, solo en el móvil.
+val localProps = java.util.Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+fun secret(name: String): String = (localProps.getProperty(name) ?: System.getenv(name) ?: "").trim()
+
 android {
     namespace = "app.macrai.android"
     compileSdk = 36
@@ -22,6 +29,9 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+
+        buildConfigField("String", "SUPABASE_URL", "\"${secret("MACRAI_SUPABASE_URL")}\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${secret("MACRAI_SUPABASE_ANON_KEY")}\"")
     }
 
     buildTypes {
@@ -36,7 +46,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     // El documento de comportamiento es la fuente única del system prompt de la nube.
     sourceSets["main"].assets.srcDir("../../docs/asistente")

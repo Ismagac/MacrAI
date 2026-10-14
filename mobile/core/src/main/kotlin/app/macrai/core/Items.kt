@@ -181,7 +181,7 @@ fun chooseProfile(
         return ProfileChoice(
             web.copy(id = newId()),
             isNew = true,
-            notes = listOf("${web.displayName}: valores de Open Food Facts$code, por 100 ${web.basis.unit}. Lo guardo en tu catálogo."),
+            notes = listOf("${web.displayName}: valores de ${web.origin ?: "la base de productos"}$code, por 100 ${web.basis.unit}. Lo guardo en tu catálogo."),
         )
     }
     if (estimate != null) {

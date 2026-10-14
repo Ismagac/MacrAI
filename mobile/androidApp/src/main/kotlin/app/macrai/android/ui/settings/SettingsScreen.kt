@@ -101,11 +101,14 @@ fun SettingsScreen(app: MacrAIApplication, modifier: Modifier = Modifier) {
             modifier = Modifier.fillMaxWidth(),
         ) { Text(if (saved) "Guardado" else "Guardar") }
 
+        AccountSection(app)
+
         Text("Datos", style = MaterialTheme.typography.titleMedium)
         Text(
-            "Tu registro se guarda en este móvil. Las etiquetas y los códigos de barras se leen en el dispositivo. " +
+            "Tu registro se guarda en este móvil y, si tienes cuenta, también en tu cuenta. Las etiquetas y los códigos de barras se leen en el dispositivo. " +
                 "Si el modelo del móvil no basta, el mensaje (y la foto, si no se pudo leer) va a Gemini en la nube, y " +
-                "las búsquedas de productos, a Open Food Facts (datos con licencia ODbL).",
+                "las búsquedas de productos, al catálogo de MacrAI y a Open Food Facts (datos con licencia ODbL). " +
+                "Si tienes cuenta, las etiquetas con código de barras que fotografíes se aportan al catálogo de MacrAI (solo el producto y sus valores, nunca lo que comes).",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -121,7 +124,11 @@ fun SettingsScreen(app: MacrAIApplication, modifier: Modifier = Modifier) {
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(
-                if (confirmWipe) "Pulsa otra vez para borrar registro, catálogo, pesos y gasto" else "Borrar todos mis datos",
+                when {
+                    !confirmWipe -> "Borrar los datos de este móvil"
+                    app.sync.session != null -> "Pulsa otra vez. Tu cuenta no se toca: se volverán a descargar"
+                    else -> "Pulsa otra vez para borrar registro, catálogo, pesos y gasto"
+                },
                 color = MaterialTheme.colorScheme.error,
             )
         }
