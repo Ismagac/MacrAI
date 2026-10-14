@@ -29,6 +29,7 @@ import app.macrai.core.ReplyBlock
 import app.macrai.core.StoreState
 import app.macrai.core.average
 import app.macrai.core.buildDayBalance
+import app.macrai.core.dayLabel
 import app.macrai.core.estimateMaintenance
 import app.macrai.core.formatNumber
 import app.macrai.core.weekBalance
@@ -80,6 +81,20 @@ fun WeekScreen(app: MacrAIApplication, modifier: Modifier = Modifier) {
         Text("Semana", style = MaterialTheme.typography.titleLarge)
         ReplyCard(AssistantReply(listOf(ReplyBlock.Title("Balance"), state.weekBalance(state.openDay ?: today))))
 
+        val steps = state.expenditures
+            .filter { it.steps != null && it.day > today.minus(DatePeriod(days = 7)) }
+            .sortedBy { it.day }
+        if (steps.isNotEmpty()) {
+            ReplyCard(
+                AssistantReply(
+                    listOf(
+                        ReplyBlock.Title("Pasos"),
+                        ReplyBlock.Notes(steps.map { "${dayLabel(it.day).replaceFirstChar { c -> c.uppercase() }}: ${formatNumber(it.steps!!.toDouble(), 0)} pasos" }),
+                    ),
+                ),
+            )
+        }
+
         val recent = state.weighIns.filter { it.day > today.minus(DatePeriod(days = 7)) }.sortedBy { it.day }
         ReplyCard(AssistantReply(listOf(ReplyBlock.Title("Peso en ayunas"), ReplyBlock.Weights(recent, average(recent)))))
 
@@ -89,7 +104,7 @@ fun WeekScreen(app: MacrAIApplication, modifier: Modifier = Modifier) {
             OutlinedButton(
                 onClick = { scope.launch { if (app.health.hasPermissions()) sync() else permissions.launch(app.health.permissions) } },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Importar peso y gasto de Health Connect") }
+            ) { Text("Importar peso, gasto y pasos de Health Connect") }
         }
         status?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }

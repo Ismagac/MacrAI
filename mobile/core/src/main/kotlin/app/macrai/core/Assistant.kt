@@ -38,25 +38,55 @@ class UserMessage(
     /** Texto de la etiqueta reconocido en el dispositivo (ML Kit), si hay foto. */
     val ocrText: String? = null,
     val image: ByteArray? = null,
+    /** EAN leído en la foto (ML Kit), si había un código de barras. */
+    val barcode: String? = null,
 )
 
 /** Más largo que esto es un dictado: no cabe en la salida del modelo local. */
 const val ON_DEVICE_MAX_CHARS = 220
 
+/** Veces que una misma forma de decir algo debe acabar en el mismo alimento antes de proponer el alias. */
+const val ALIAS_CONFIRM_AFTER = 2
+
 class MacroAssistant(
     private val store: MacroStore,
     private val model: LanguageModel,
     private val behaviorDoc: String,
+    /** Base de productos de marca (Open Food Facts). Sin ella, lo que no esté en el catálogo se estima. */
+    private val foods: FoodDatabase? = null,
 ) {
     suspend fun handle(message: UserMessage): AssistantReply {
         val state = store.state()
         val parsed = extract(message, state)
-            ?: return AssistantReply(listOf(ReplyBlock.Text("No he podido interpretarlo. ¿Me lo repites con otras palabras?")))
-
         val turn = Turn(message.at)
-        notifyMishearings(parsed, turn)
-        for (action in parsed.acciones) apply(action, message, turn)
+        if (parsed == null) {
+            if (message.barcode == null) {
+                return AssistantReply(listOf(ReplyBlock.Text("No he podido interpretarlo. ¿Me lo repites con otras palabras?")))
+            }
+        } else {
+            notifyMishearings(parsed, turn)
+            for (action in parsed.acciones) apply(action, message, turn)
+        }
+        // Foto de un código de barras sin cantidad: se identifica el producto y se pregunta cuánto.
+        val usedBarcode = parsed?.acciones.orEmpty().any { it is Action.Add || it is Action.SaveLabel || it is Action.CorrectProduct }
+        if (message.barcode != null && !usedBarcode) identifyBarcode(message.barcode, turn)
         return compose(turn)
+    }
+
+    private suspend fun identifyBarcode(code: String, turn: Turn) {
+        val state = store.state()
+        val known = state.catalog.firstOrNull { it.barcode == code }
+        val food = known ?: foods?.let { runCatching { it.byBarcode(code) }.getOrNull() }?.copy(id = nextId(state, "f"))
+        if (food == null) {
+            turn.blocks += ReplyBlock.Text("No encuentro el código $code en Open Food Facts.")
+            turn.ask("¿Me pasas la foto de la tabla nutricional?")
+            return
+        }
+        if (known == null) store.update { s -> s.upsertFood(food).copy(nextId = s.nextId + 1) }
+        val origin = if (known != null) "Lo tienes en tu catálogo" else "Lo he encontrado en Open Food Facts y lo he guardado en tu catálogo"
+        turn.blocks += ReplyBlock.Title(food.displayName + (food.packFormat?.let { " ($it)" } ?: ""))
+        turn.blocks += ReplyBlock.Text("$origin. ${labelSummary(food)}")
+        turn.ask("¿Cuánto has tomado y en qué comida?")
     }
 
     private suspend fun extract(message: UserMessage, state: StoreState): ParsedMessage? {
@@ -120,7 +150,7 @@ class MacroAssistant(
 
     private suspend fun apply(action: Action, message: UserMessage, turn: Turn) {
         when (action) {
-            is Action.Add -> add(action, turn)
+            is Action.Add -> add(action, message, turn)
             is Action.AddKcalOnly -> addKcalOnly(action, turn)
             is Action.CorrectQuantity -> correctQuantity(action, turn)
             is Action.CorrectEdible -> correctEdible(action, turn)
@@ -141,15 +171,18 @@ class MacroAssistant(
         }
     }
 
-    private suspend fun add(action: Action.Add, turn: Turn) {
+    private suspend fun add(action: Action.Add, message: UserMessage, turn: Turn) {
+        // El código de barras de la foto solo identifica al alimento si es el único del mensaje.
+        val barcode = message.barcode?.takeIf { action.items.size == 1 }
         for (spec in action.items) {
             val state = store.state()
             val day = dayFor(state, turn.now, action.comida, action.dia)
             val lastInDay = state.entriesOf(day.day).maxByOrNull { it.loggedAt }
             val meal = resolveMeal(turn.now, action.comida, day, lastInDay)
 
+            val web = if (needsProductLookup(spec, state, barcode)) lookupProduct(spec, barcode) else null
             var idCounter = state.nextId
-            val choice = chooseProfile(spec, state.catalog, state.entries, newId = { "f${idCounter++}" })
+            val choice = chooseProfile(spec, state.catalog, state.entries, newId = { "f${idCounter++}" }, barcode = barcode, web = web)
             if (choice == null) {
                 turn.ask("No tengo «${spec.alimento}» en el catálogo. ¿Cuántas kcal tiene, o me pasas la etiqueta?")
                 continue
@@ -203,7 +236,53 @@ class MacroAssistant(
             turn.added += entry
             turn.touchedDay = day.day
             turn.showDay = true
+            if (!choice.isNew) learnAlias(spec, choice.profile, turn)
         }
+    }
+
+    /**
+     * Paso 4 de la cascada: solo si no hay etiqueta, ni entrada en el catálogo, ni kcal del
+     * usuario; y solo para productos de marca, con código de barras o que el modelo no sabe estimar.
+     * Los genéricos ("pechuga de pollo") se estiman: en la base salen marcas al azar.
+     */
+    private fun needsProductLookup(spec: ItemSpec, state: StoreState, barcode: String?): Boolean =
+        foods != null &&
+            spec.etiqueta == null &&
+            spec.kcalPer100 == null &&
+            findInCatalogFor(spec, state.catalog, state.entries, barcode) == null &&
+            (spec.marca != null || barcode != null || spec.estimatePer100 == null)
+
+    private suspend fun lookupProduct(spec: ItemSpec, barcode: String?): FoodProfile? {
+        val db = foods ?: return null
+        return runCatching {
+            barcode?.let { db.byBarcode(it) } ?: db.search(listOfNotNull(spec.alimento, spec.marca).joinToString(" "))
+                .firstOrNull { p ->
+                    p.bestScore(spec.alimento) >= MIN_MATCH_SCORE &&
+                        (spec.marca == null || matchScore(spec.marca, p.brand ?: p.name) > 0)
+                }
+        }.getOrNull()
+    }
+
+    /**
+     * Si el usuario llama a un alimento del catálogo de una forma que no es su nombre ni un alias,
+     * y lo hace varias veces, se le pregunta una vez si guardarla como alias.
+     */
+    private suspend fun learnAlias(spec: ItemSpec, food: FoodProfile, turn: Turn) {
+        val phrase = spec.dicho?.trim()?.takeIf { it.length >= 3 } ?: return
+        val key = normalizeText(phrase)
+        if ((listOf(food.name, food.displayName) + food.aliases).any { normalizeText(it) == key }) return
+
+        val evidenceKey = "$key|${food.id}"
+        val state = store.update { s ->
+            s.copy(aliasEvidence = s.aliasEvidence + (evidenceKey to (s.aliasEvidence[evidenceKey] ?: 0) + 1))
+        }
+        val pendingKey = "$ALIAS_KEY${food.id}|$phrase"
+        val alreadyAsked = "alias-no:$evidenceKey" in state.notedOnce || state.pending.any { it.key.startsWith("$ALIAS_KEY${food.id}|") }
+        if ((state.aliasEvidence[evidenceKey] ?: 0) < ALIAS_CONFIRM_AFTER || alreadyAsked || turn.question != null) return
+
+        val question = "Cuando dices «$phrase», ¿te refieres siempre a ${food.displayName}? Si me dices que sí, lo guardo como alias."
+        turn.ask(question)
+        store.update { s -> s.copy(pending = s.pending + PendingQuestion(pendingKey, question, s.openDay ?: turn.now.date)) }
     }
 
     private suspend fun addKcalOnly(action: Action.AddKcalOnly, turn: Turn) {
@@ -238,10 +317,6 @@ class MacroAssistant(
             ?.first
     }
 
-    private suspend fun replaceEntry(updated: LogEntry) {
-        store.update { s -> s.copy(entries = s.entries.map { if (it.id == updated.id) updated else it }) }
-    }
-
     private fun changeRows(before: LogEntry, after: LogEntry): List<Triple<String, String, String>> = buildList {
         if (before.grams != after.grams) add(Triple("Cantidad", formatGrams(before.grams), formatGrams(after.grams)))
         add(Triple("Kcal", formatKcal(before.macros.kcal), formatKcal(after.macros.kcal)))
@@ -254,7 +329,7 @@ class MacroAssistant(
         val target = findEntry(store.state(), action.objetivo)
             ?: return turn.ask("¿Qué registro quieres cambiar?")
         val updated = target.rescaledTo(action.cantidad).copy(statedGrams = null)
-        replaceEntry(updated)
+        store.update { it.updateEntryGrams(target.id, action.cantidad) }
         turn.blocks += ReplyBlock.Title("Corregido: ${target.name}, ${formatGrams(target.grams)} → ${formatGrams(updated.grams)}")
         turn.blocks += ReplyBlock.Change(changeRows(target, updated))
         turn.touchedDay = target.day
@@ -270,7 +345,7 @@ class MacroAssistant(
             return
         }
         val updated = target.rescaledTo(stated).copy(statedGrams = null)
-        replaceEntry(updated)
+        store.update { it.updateEntryGrams(target.id, stated) }
         turn.blocks += ReplyBlock.Title("Corregido: ${target.name} sin hueso, ${formatGrams(target.grams)} → ${formatGrams(stated)}")
         turn.blocks += ReplyBlock.Change(changeRows(target, updated))
         turn.touchedDay = target.day
@@ -300,22 +375,14 @@ class MacroAssistant(
 
         warnIfOdd(updatedFood, turn)
 
-        val affected = state.entries.filter { it.foodId == food.id && it.day >= (state.openDay ?: it.day).minus(DatePeriod(days = 6)) }
-        val recalculated = affected.map { e ->
-            val macros = if (e.grams > 0) updatedFood.macrosForGrams(e.grams) else updatedFood.macrosForUnits(1.0) ?: e.macros
-            e.copy(macros = macros, source = updatedFood.source, provisional = false)
-        }
-        store.update { s ->
-            s.copy(
-                catalog = s.catalog.map { if (it.id == food.id) updatedFood else it },
-                entries = s.entries.map { e -> recalculated.firstOrNull { it.id == e.id } ?: e },
-            )
-        }
+        val since = state.openDay?.minus(DatePeriod(days = RECALC_DAYS))
+        val affected = state.entries.filter { it.foodId == food.id && !it.kcalOnly && (since == null || it.day >= since) }
+        val updated = store.update { it.upsertFood(updatedFood) }
 
         turn.blocks += ReplyBlock.Title("Actualizado: ${updatedFood.displayName}")
         if (action.etiqueta != null) turn.notes += labelSummary(updatedFood)
         val last = affected.maxByOrNull { it.loggedAt }
-        val lastNew = recalculated.maxByOrNull { it.loggedAt }
+        val lastNew = last?.let { l -> updated.entries.firstOrNull { it.id == l.id } }
         if (last != null && lastNew != null) {
             turn.blocks += ReplyBlock.Change(changeRows(last, lastNew), conclusion = deltaConclusion(last.macros, lastNew.macros))
             turn.touchedDay = last.day
@@ -376,7 +443,7 @@ class MacroAssistant(
 
     private suspend fun move(action: Action.Move, turn: Turn) {
         val target = findEntry(store.state(), action.objetivo) ?: return turn.ask("¿Qué registro muevo?")
-        replaceEntry(target.copy(meal = action.comida))
+        store.update { it.moveEntry(target.id, action.comida) }
         turn.blocks += ReplyBlock.Title("Movido: ${target.name}, de ${target.meal.label.lowercase()} a ${action.comida.label.lowercase()}")
         turn.touchedDay = target.day
         turn.showDay = true
@@ -384,7 +451,7 @@ class MacroAssistant(
 
     private suspend fun delete(action: Action.Delete, turn: Turn) {
         val target = findEntry(store.state(), action.objetivo) ?: return turn.ask("¿Qué registro borro?")
-        store.update { s -> s.copy(entries = s.entries.filterNot { it.id == target.id }) }
+        store.update { it.deleteEntry(target.id) }
         turn.blocks += ReplyBlock.Title("Borrado: ${formatGrams(target.grams)} ${target.name} de la ${target.meal.label.lowercase()}")
         turn.touchedDay = target.day
         turn.showDay = true
@@ -412,8 +479,23 @@ class MacroAssistant(
         val state = store.state()
         val food = findInCatalog(action.alimento, state.catalog, state.entries)
         if (food == null) {
-            turn.blocks += ReplyBlock.Text("No, no tengo «${action.alimento}» en el catálogo.")
-            turn.ask("¿Me pasas la foto de la etiqueta?")
+            // Fuera del catálogo personal: se busca en la base de productos y, si aparece, se guarda.
+            val found = foods?.let { db ->
+                runCatching { db.search(action.alimento).firstOrNull { it.bestScore(action.alimento) >= MIN_MATCH_SCORE } }.getOrNull()
+            }
+            if (found == null) {
+                turn.blocks += ReplyBlock.Text("No, no tengo «${action.alimento}» en el catálogo.")
+                turn.ask("¿Me pasas la foto de la etiqueta o el código de barras?")
+                return
+            }
+            val saved = found.copy(id = nextId(state, "f"))
+            store.update { s -> s.upsertFood(saved).copy(nextId = s.nextId + 1) }
+            turn.blocks += ReplyBlock.Text(
+                "No lo tenía, pero en Open Food Facts está ${saved.displayName}" +
+                    (saved.packFormat?.let { " ($it)" } ?: "") + ". ${labelSummary(saved)} Lo he guardado en tu catálogo.",
+            )
+            turn.notes += "Si tu producto es otro, pásame la foto de la etiqueta y lo guardo aparte."
+            turn.ask("¿Cuánto y en qué comida?")
             return
         }
         turn.blocks += ReplyBlock.Text(

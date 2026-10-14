@@ -183,6 +183,26 @@ El documento de comportamiento llevaba dentro tu catálogo personal (apéndices 
 
 El contexto personal (§15: peso, altura, objetivo, lesiones) sale del perfil de cada usuario y se rellena en el onboarding.
 
+### 5.2 Productos de supermercado: de dónde salen
+
+Cómo lo resuelven las apps que "tienen de todo":
+
+- **QuéFalta** reúne catálogos y precios de 19 supermercados. No explica de dónde salen los precios; la nutrición la saca, según su web, de los datos disponibles y de la API de Open Food Facts.
+- **EasyCompra** (Kotlin/Compose, código abierto) lo documenta. Mercadona: API interna de `tienda.mercadona.es` recorrida por categorías. Dia: API de `dia.es`. Carrefour: detrás de Akamai, con un navegador automatizado. Lidl: HTML. La nutrición sale de Open Food Facts por EAN y de la ficha de Dia.
+- **Cobertura real** (datos de EasyCompra del 13 de octubre de 2026): Mercadona, 2.865 productos, todos con EAN y 983 (34 %) con macros completos; Dia, 609 de 754; Carrefour y Lidl, ninguno.
+- **La API de Mercadona** da id, nombre, precio, foto, EAN, formato, ingredientes y alérgenos, pero **no la tabla nutricional**. Es interna: sin documentación ni términos para terceros, y su `robots.txt` bloquea `/api`.
+
+**Lo que hace MacrAI ahora (sin servidor):**
+
+1. Catálogo personal: etiquetas, correcciones, alias y lo ya buscado.
+2. Código de barras en la foto → Open Food Facts por EAN.
+3. Producto de marca nombrado en el chat → búsqueda en Open Food Facts (primero España, luego mundial).
+4. Genéricos ("pechuga de pollo") → estimación del modelo, marcada como tal.
+
+Todo lo que viene de fuera se guarda en el catálogo del usuario con su EAN y su fuente (`Web`).
+
+**Siguiente paso posible: catálogo compartido en el servidor.** Una tarea diaria en Supabase (o en GitHub Actions) recorre los catálogos de Mercadona y Dia, guarda nombre, EAN, formato y foto en `alimentos_global`, y los cruza con Open Food Facts por EAN. Las etiquetas que fotografían los usuarios rellenan los huecos para todos. Así, "la leche de Hacendado" funcionaría sin escanear nada. Es lo que hacen QuéFalta y EasyCompra, pero depende de APIs no oficiales que pueden cambiar o cerrarse, y para una app publicada conviene revisar antes los términos de cada supermercado. Nunca desde el móvil de cada usuario: bloquearían su IP.
+
 ---
 
 ## 6. Nueva imagen y UX
@@ -272,6 +292,7 @@ Cuando la app tenga cuentas y sincronización, la web Next.js deja de hacer falt
 | Borrado de cuenta | Desde la app y desde una URL web | Requisito de Google Play para apps con cuentas |
 | Seguridad de datos | Formulario de Play: datos recogidos (salud, fotos, voz), dónde se procesan (dispositivo o nube) y si se comparten | Requisito de Google Play |
 | Aviso | "No es consejo médico" en el onboarding | Habla de déficit, peso y lesiones |
+| Open Food Facts | Citar la fuente (licencia ODbL) en la app y respetar sus límites (unas 10 búsquedas y 15 lecturas por minuto e IP), con un User-Agent propio | Condiciones de uso de su API |
 | Identidad | `applicationId` definitivo antes de la primera subida (hoy `app.macrai`), icono adaptativo final y ficha de Play | El `applicationId` no se puede cambiar después |
 | Pruebas | Pista interna para ti y después pruebas cerradas; las cuentas de desarrollador personales necesitan un grupo de testers durante dos semanas antes de producción (comprobar el número exacto en Play Console) | Requisito de Google Play para cuentas nuevas |
 
@@ -316,3 +337,6 @@ El wrapper de Gradle (8.14.3) va incluido. Los tests del núcleo se han ejecutad
 - [Foro de Samsung: fiabilidad de la sincronización con Health Connect](https://forum.developer.samsung.com/t/syncing-data-is-unreliable-between-samsung-health-and-health-connect/24850)
 - [Publicar una app de salud en Google Play](https://developer.android.com/health-and-fitness/health-connect/publish) y [declarar el acceso a tipos de datos de Health Connect](https://developer.android.com/health-and-fitness/guides/health-connect/publish/declare-access)
 - [Términos de la Gemini API: uso de datos en la capa gratuita](https://simonwillison.net/2024/Oct/17/gemini-terms-of-service)
+- [QuéFalta](https://quefalta.es/), [EasyCompra](https://github.com/elopositor/EasyCompra) y [sus datos](https://github.com/elopositor/EasyCompra-datos)
+- [Endpoints de la API de Mercadona (datania)](https://github.com/datania/mercadona-catalog/blob/main/api.md) y [mercaapi](https://github.com/m0wer/mercaapi)
+- [Documentación de la API de Open Food Facts](https://openfoodfacts.github.io/openfoodfacts-server/api/)

@@ -12,6 +12,7 @@ firebase-ai = "17.10.1"
 firebase-ai-ondevice = "16.0.0-beta01"
 google-services = "4.4.3"
 mlkit-text = "16.0.1"
+mlkit-barcode = "17.3.0"
 health-connect = "1.1.0"
 play-services-coroutines = "1.10.2"
 
@@ -36,6 +37,7 @@ compose-material-icons-extended = { module = "androidx.compose.material:material
 firebase-ai = { module = "com.google.firebase:firebase-ai", version.ref = "firebase-ai" }
 firebase-ai-ondevice = { module = "com.google.firebase:firebase-ai-ondevice", version.ref = "firebase-ai-ondevice" }
 mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "mlkit-text" }
+mlkit-barcode-scanning = { module = "com.google.mlkit:barcode-scanning", version.ref = "mlkit-barcode" }
 health-connect = { module = "androidx.health.connect:connect-client", version.ref = "health-connect" }
 
 [plugins]

@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,6 +58,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -94,13 +96,14 @@ fun ChatScreen(app: MacrAIApplication, modifier: Modifier = Modifier) {
     val vm = viewModel { ChatViewModel(app.assistant) { app.aiConfigured } }
     val state by app.store.flow.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+    var openMeal by remember { mutableStateOf<Meal?>(null) }
 
     LaunchedEffect(vm.items.size) {
         if (vm.items.isNotEmpty()) listState.animateScrollToItem(vm.items.lastIndex)
     }
 
     Column(modifier.fillMaxSize().imePadding()) {
-        DayStrip(state)
+        DayStrip(state, onMeal = { openMeal = it })
         if (vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp))
 
         Box(Modifier.weight(1f)) {
@@ -123,11 +126,12 @@ fun ChatScreen(app: MacrAIApplication, modifier: Modifier = Modifier) {
         }
         Composer(onSend = vm::send, enabled = !vm.busy)
     }
+    openMeal?.let { MealSheet(app, state, it, onDismiss = { openMeal = null }) }
 }
 
 /** Día de registro, kcal y proteína frente al mínimo, y las cinco comidas. */
 @Composable
-private fun DayStrip(state: StoreState) {
+private fun DayStrip(state: StoreState, onMeal: (Meal) -> Unit) {
     val day = state.openDay
     val entries = day?.let { state.entriesOf(it) }.orEmpty()
     val total = entries.map { it.macros }.sum()
@@ -163,17 +167,19 @@ private fun DayStrip(state: StoreState) {
         Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Meal.entries.forEach { meal ->
                 val kcal = entries.filter { it.meal == meal }.sumOf { it.macros.kcal }
-                MealChip(meal.label.substringBefore(' '), kcal, Modifier.weight(1f))
+                MealChip(meal.label.substringBefore(' '), kcal, Modifier.weight(1f), enabled = state.openDay != null) { onMeal(meal) }
             }
         }
     }
 }
 
 @Composable
-private fun MealChip(label: String, kcal: Double, modifier: Modifier) {
+private fun MealChip(label: String, kcal: Double, modifier: Modifier, enabled: Boolean, onClick: () -> Unit) {
     val filled = kcal > 0
     Column(
         modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(enabled = enabled, onClick = onClick)
             .background(if (filled) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp))
             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
             .padding(vertical = 6.dp),
@@ -265,7 +271,11 @@ private fun Composer(onSend: (String, Photo?) -> Unit, enabled: Boolean) {
             Row(Modifier.padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Image(p.bitmap.asImageBitmap(), null, Modifier.size(44.dp), contentScale = ContentScale.Crop)
                 Text(
-                    if (p.text.isBlank()) "Foto adjunta" else "Etiqueta leída en el móvil",
+                    when {
+                        p.barcode != null -> "Código de barras ${p.barcode}"
+                        p.text.isNotBlank() -> "Etiqueta leída en el móvil"
+                        else -> "Foto adjunta"
+                    },
                     Modifier.padding(start = 10.dp).weight(1f),
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -277,7 +287,7 @@ private fun Composer(onSend: (String, Photo?) -> Unit, enabled: Boolean) {
                 IconButton(onClick = { menu = true }, enabled = enabled) { Icon(Icons.Outlined.CameraAlt, "Foto") }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(
-                        text = { Text("Foto de la etiqueta") },
+                        text = { Text("Foto de la etiqueta o del código de barras") },
                         leadingIcon = { Icon(Icons.Outlined.CameraAlt, null) },
                         onClick = {
                             menu = false

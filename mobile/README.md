@@ -48,6 +48,22 @@ cd mobile
 
 No necesitan móvil ni emulador.
 
+## Qué funciona en esta versión
+
+| Función | Estado |
+|---|---|
+| Chat por texto y voz, con las reglas del documento (día que no cambia a medianoche, comida por contexto, supuestos visibles, correcciones) | Sí |
+| Foto de etiqueta: OCR en el móvil y validación kcal ≈ 4P + 4C + 9G | Sí |
+| Código de barras en la foto → producto de Open Food Facts | Sí |
+| Productos de marca que no estén en tu catálogo ("pechuga de pavo Hacendado") → Open Food Facts | Sí |
+| Catálogo personal: búsqueda tolerante a errores, edición de valores, peso por unidad, borrar | Sí |
+| Alias: "cuando diga X me refiero a Y", alias a mano en la ficha, y el chat te propone uno cuando llamas a algo siempre igual | Sí |
+| Control manual del día: tocar una comida, cambiar gramos, moverla de comida o borrarla | Sí |
+| Peso, gasto y pasos de Health Connect; balance semanal y estimación del mantenimiento | Sí |
+| Ajustes: peso, proteína por kg y objetivo de déficit | Sí |
+| Cuentas, sincronización entre móviles y copia en Supabase | No: fase 2 |
+| Catálogo completo de los supermercados (lo que hace QuéFalta) | No: ver «Productos de supermercado» en el plan |
+
 ## Cosas a tener en cuenta en la primera prueba
 
 - **Primera compilación:** el módulo Android se escribió en un entorno sin acceso al repositorio Maven de Google, así que no se ha compilado nunca. Si falla algo, casi seguro será un import o una versión en `ai/HybridLanguageModel.kt` (la API híbrida de Firebase es experimental). El núcleo sí está compilado y probado.
@@ -57,5 +73,6 @@ No necesitan móvil ni emulador.
 - **Health Connect:** en Samsung Health, activa la sincronización con Health Connect (Samsung Health → Ajustes → Health Connect) y concede peso y calorías. Después, en la pestaña **Semana**, pulsa "Importar peso y gasto de Health Connect". Si no hay datos, la captura del reloj sigue funcionando desde el chat.
 - **Mínimo de proteína:** sale de tu peso (1,5 g/kg). Hasta que registres un peso ("apunta 92,6 para el peso") o lo importes de Health Connect, no se muestra.
 - **Datos:** de momento se guardan solo en el móvil (`registro.json`). Desinstalar la app los borra. Las cuentas y la sincronización con Supabase son la fase 2 del plan.
+- **Open Food Facts:** tiene buena cobertura de Hacendado y otras marcas, pero no de todo, y su API limita a unas 10 búsquedas por minuto. Lo que encuentra se guarda en tu catálogo, así que cada producto se busca una sola vez. Si un producto no aparece, la foto de la etiqueta sigue siendo lo más fiable.
 - **Tu catálogo:** empieza vacío. Tu catálogo de las semanas de prueba está en `docs/datos/catalogo-inicial.md` y se importará en la fase 2. Mientras tanto, la app aprende de lo que registres y de las etiquetas que fotografíes.
 - **Cuotas:** la capa gratuita de Gemini tiene límites diarios por proyecto. Para probar tú solo sobran; para publicar hace falta el plan de pago (ver el plan).

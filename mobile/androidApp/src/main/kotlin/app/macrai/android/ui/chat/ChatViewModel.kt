@@ -52,6 +52,7 @@ class ChatViewModel(
                 at = LocalDateTime.now().toKotlinLocalDateTime(),
                 ocrText = photo?.text,
                 image = photo?.jpeg,
+                barcode = photo?.barcode,
             ),
         )
     }

@@ -68,6 +68,8 @@ dependencies {
     implementation(libs.firebase.ai.ondevice)
     // OCR de etiquetas en el dispositivo, gratis y en cualquier móvil
     implementation(libs.mlkit.text.recognition)
+    // Código de barras (EAN) en la foto: identifica el producto en Open Food Facts
+    implementation(libs.mlkit.barcode.scanning)
     // Peso y gasto del reloj (Samsung Health escribe en Health Connect)
     implementation(libs.health.connect)
 }

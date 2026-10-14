@@ -3,6 +3,7 @@ package app.macrai.android.health
 import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.AggregateRequest
@@ -17,16 +18,18 @@ import kotlinx.datetime.LocalDate
 import kotlinx.datetime.toJavaLocalDate
 import kotlinx.datetime.toKotlinLocalDate
 
-// Samsung Health escribe peso y calorías totales en Health Connect: con esto ya no hace
-// falta mandar capturas del reloj cada noche. Se mantiene la captura como respaldo, porque
-// la sincronización de Samsung con Health Connect a veces llega tarde o incompleta.
+// Samsung Health escribe peso, calorías totales y pasos en Health Connect: con esto ya no
+// hace falta mandar capturas del reloj cada noche. Se mantiene la captura como respaldo,
+// porque la sincronización de Samsung con Health Connect a veces llega tarde o incompleta.
 //
-// Solo se piden los dos tipos que usa el balance: Google Play exige justificar cada uno.
+// Google Play exige justificar cada tipo: peso y calorías alimentan el balance; los pasos
+// explican el gasto de cada día en la pantalla Semana.
 
 class HealthConnectSource(private val context: Context) {
     val permissions = setOf(
         HealthPermission.getReadPermission(WeightRecord::class),
         HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
+        HealthPermission.getReadPermission(StepsRecord::class),
     )
 
     val available: Boolean
@@ -37,19 +40,20 @@ class HealthConnectSource(private val context: Context) {
     suspend fun hasPermissions(): Boolean =
         client.permissionController.getGrantedPermissions().containsAll(permissions)
 
-    /** Gasto total por día de calendario (el reloj cierra a medianoche). */
+    /** Gasto total y pasos por día de calendario (el reloj cierra a medianoche). */
     suspend fun expenditures(from: LocalDate, to: LocalDate, zone: ZoneId = ZoneId.systemDefault()): List<Expenditure> {
         val result = mutableListOf<Expenditure>()
         var day: JavaDate = from.toJavaLocalDate()
         while (!day.isAfter(to.toJavaLocalDate())) {
             val range = TimeRangeFilter.between(day.atStartOfDay(zone).toInstant(), day.plusDays(1).atStartOfDay(zone).toInstant())
             val totals = client.aggregate(
-                AggregateRequest(metrics = setOf(TotalCaloriesBurnedRecord.ENERGY_TOTAL), timeRangeFilter = range),
+                AggregateRequest(metrics = setOf(TotalCaloriesBurnedRecord.ENERGY_TOTAL, StepsRecord.COUNT_TOTAL), timeRangeFilter = range),
             )
             totals[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.let { energy ->
                 result += Expenditure(
                     day = day.toKotlinLocalDate(),
                     totalKcal = energy.inKilocalories,
+                    steps = totals[StepsRecord.COUNT_TOTAL]?.toInt(),
                     source = ExpenditureSource.HEALTH_CONNECT,
                 )
             }
